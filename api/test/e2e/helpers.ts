@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { type INestApplication, type Type, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { getOptionsToken } from '@nestjs/throttler';
 import request from 'supertest';
 import { vi } from 'vitest';
 import { AppModule } from '../../src/app.module.js';
@@ -18,7 +19,13 @@ export async function createTestApp(
     sentMails.push(message);
   });
 
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule, ...extraModules] }).compile();
+  const moduleRef = await Test.createTestingModule({ imports: [AppModule, ...extraModules] })
+    // Request-heavy specs (pagination, isolation) would trip the real 60/min global limit.
+    // Better Auth's own sign-up/sign-in limits are deliberately left on: keep each spec file
+    // to at most 5 signUpAndVerify calls.
+    .overrideProvider(getOptionsToken())
+    .useValue([{ name: 'default', ttl: 60_000, limit: 100_000 }])
+    .compile();
   const app = moduleRef.createNestApplication();
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
   app.setGlobalPrefix('api/v1', {

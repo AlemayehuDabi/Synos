@@ -15,6 +15,18 @@ export const SANDBOX_ACTION_CONFLICT = 'sandbox.apply-conflict';
 const paramsSchema = z.object({ billId: z.string().min(1) });
 type Params = z.infer<typeof paramsSchema>;
 
+/**
+ * Writes a marker row through the engine-provided transaction. The failing
+ * handlers below call this *before* failing, so tests can prove the engine
+ * discards a handler's partial writes rather than just that it caught the error.
+ */
+export const PARTIAL_WRITE_KIND = 'manual_override' as const;
+async function writePartialWrite(ctx: ActionHandlerContext): Promise<void> {
+  await ctx.tx.activityLog.create({
+    data: { userId: ctx.userId, kind: PARTIAL_WRITE_KIND, entityRef: { partialWriteBy: ctx.suggestionId } },
+  });
+}
+
 /** Revertible success handler. */
 @Injectable()
 @ActionHandler(SANDBOX_ACTION_APPLY)
@@ -66,7 +78,8 @@ export class SandboxThrowsHandler implements ActionHandler<Params> {
   readonly paramsSchema = paramsSchema;
   readonly supportsRevert = false;
 
-  async apply(): Promise<ApplyResult> {
+  async apply(ctx: ActionHandlerContext): Promise<ApplyResult> {
+    await writePartialWrite(ctx);
     throw new Error('sandbox handler intentionally threw');
   }
 }
@@ -80,7 +93,8 @@ export class SandboxConflictHandler implements ActionHandler<Params> {
   readonly paramsSchema = paramsSchema;
   readonly supportsRevert = false;
 
-  async apply(): Promise<ApplyResult> {
+  async apply(ctx: ActionHandlerContext): Promise<ApplyResult> {
+    await writePartialWrite(ctx);
     return { outcome: 'conflict', reason: 'sandbox handler intentionally reported a conflict' };
   }
 }

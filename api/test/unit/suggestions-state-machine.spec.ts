@@ -12,6 +12,7 @@ function createPrismaMock() {
       findMany: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn(),
+      updateManyAndReturn: vi.fn(),
       count: vi.fn(),
     },
     activityLog: { findMany: vi.fn().mockResolvedValue([]) },
@@ -91,12 +92,12 @@ describe('SuggestionsService state machine', () => {
         signal: null,
       });
       registry.getHandler.mockReturnValue({ paramsSchema });
-      prisma.suggestion.update.mockResolvedValue({});
+      prisma.suggestion.updateMany.mockResolvedValue({ count: 1 });
 
       await service.edit('u1', 's1', { billId: 'new' });
 
-      expect(prisma.suggestion.update).toHaveBeenCalledWith({
-        where: { id: 's1' },
+      expect(prisma.suggestion.updateMany).toHaveBeenCalledWith({
+        where: { id: 's1', userId: 'u1', status: 'pending' },
         data: { params: { billId: 'new' }, originalParams: { billId: 'old' } },
       });
     });
@@ -128,14 +129,19 @@ describe('SuggestionsService state machine', () => {
       configService.get.mockReturnValue(2);
       prisma.suggestion.count.mockResolvedValue(2);
       prisma.suggestion.findMany.mockResolvedValue([{ id: 'oldest' }]);
-      prisma.suggestion.updateMany.mockResolvedValue({ count: 1 });
+      prisma.suggestion.updateManyAndReturn.mockResolvedValue([{ id: 'oldest' }]);
 
       await service.enforcePendingCap(prisma as never, 'u1', 'bill-to-reminder');
 
-      expect(prisma.suggestion.updateMany).toHaveBeenCalledWith({
+      expect(prisma.suggestion.updateManyAndReturn).toHaveBeenCalledWith({
         where: { id: { in: ['oldest'] }, status: 'pending' },
         data: expect.objectContaining({ status: 'expired' }),
+        select: { id: true },
       });
+      expect(activityService.log).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'expired', suggestionId: 'oldest' }),
+        prisma,
+      );
     });
 
     it('does nothing when under the cap', async () => {

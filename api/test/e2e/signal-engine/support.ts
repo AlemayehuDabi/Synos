@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import { SandboxModule } from '../../sandbox/sandbox.module.js';
 import { SignalEngineFacade } from '../../../src/signal-engine/signal-engine.facade.js';
-import { createTestApp, type SentMail } from '../helpers.js';
+import request from 'supertest';
+import { bearer, createTestApp, type SentMail } from '../helpers.js';
 
 export async function createEngineTestApp(): Promise<{
   app: INestApplication;
@@ -31,4 +32,19 @@ export async function emitBillDue(facade: SignalEngineFacade, userId: string, pr
   const payload = billDuePayload(`${prefix}${randomUUID()}`);
   const signal = await facade.emit({ userId, type: 'bill.due', payload });
   return { signal, payload };
+}
+
+/** Finds the suggestion the sandbox rule produced for a given billId (any status). */
+export async function findSuggestion(
+  app: INestApplication,
+  token: string,
+  billId: string,
+  status: 'pending' | 'approved' | 'auto_applied' | 'superseded' | 'failed' | 'dismissed' = 'pending',
+) {
+  const res = await request(app.getHttpServer())
+    .get('/api/v1/inbox')
+    .query({ status, limit: 100 })
+    .set(bearer(token))
+    .expect(200);
+  return res.body.items.find((s: { targetKey: string }) => s.targetKey === `sandbox:bill:${billId}`);
 }
