@@ -1,118 +1,128 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Synos API
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+The NestJS backend for Synos. This slice of the project covers **authentication and
+account management** only: sign-up/sign-in, sessions, profile, settings, privacy,
+devices, data export, and account deletion. No domain features (tasks, habits,
+etc.) live here yet.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## Stack
 
-## Description
+- NestJS 12 (ESM), Express
+- Prisma 7 with the `@prisma/adapter-pg` driver adapter (Postgres)
+- [Better Auth](https://www.better-auth.com/) via `@thallesp/nestjs-better-auth`, with the Prisma adapter and the bearer plugin
+- Vitest + Supertest for unit and e2e tests
+- zod for env validation, class-validator/class-transformer for request DTOs
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## Prerequisites
 
-## Project setup
+- Node.js 22+
+- Docker (for local Postgres) — or any reachable Postgres 15+
+
+## Setup
 
 ```bash
-$ npm install
+npm install
+cp .env.example .env        # then fill in BETTER_AUTH_SECRET at minimum
+docker compose up -d        # starts Postgres, and creates both `synos` and `synos_test` databases
+npm run prisma:migrate      # applies migrations to DATABASE_URL (the dev database)
+npm run start:dev
 ```
 
-## Compile and run the project
+The app listens on `http://localhost:3000` by default. Our own routes are under
+`/api/v1/*`; Better Auth's own routes (sign-up, sign-in, sessions, etc.) live at
+`/api/auth/*`, outside that prefix. `GET /healthz` and `GET /healthz/ready` are also
+unprefixed, for liveness/readiness probes.
+
+In development, OpenAPI docs are served at `http://localhost:3000/docs`.
+
+## Environment variables
+
+See `.env.example` for the full list with comments. The ones that need real values
+before anything works:
+
+| Variable | Notes |
+| --- | --- |
+| `DATABASE_URL` | Postgres connection string for the running app |
+| `DATABASE_URL_TEST` | Separate database used only by `npm run test:e2e` |
+| `BETTER_AUTH_SECRET` | 32+ random characters. Generate one with `npx auth@latest secret` |
+| `BETTER_AUTH_URL` | Public base URL of this API |
+| `CORS_ORIGINS` | Comma-separated allowlist, used for both CORS and Better Auth's `trustedOrigins` |
+
+`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` and `APPLE_CLIENT_ID`/`APPLE_CLIENT_SECRET`/
+`APPLE_APP_BUNDLE_IDENTIFIER` are optional — each social provider only turns on when
+its variables are present. Note that Apple does not issue a static client secret:
+`APPLE_CLIENT_SECRET` must be a pre-generated ES256 JWT (signed with your team id /
+key id / `.p8` private key), which you are responsible for generating and rotating
+before it expires.
+
+## Database & migrations
+
+The schema lives at `prisma/schema.prisma`. Better Auth's own tables (`user`,
+`session`, `account`, `verification`) are generated by its CLI, not hand-written:
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+npx auth generate --config src/lib/auth.ts -y   # regenerates Better Auth's models after changing src/lib/auth.ts
 ```
 
-## Run tests
+Everything else (`UserSettings`, `PrivacySettings`, `Device`, `DataExportJob`,
+`IdempotencyKey`) is hand-written below those generated models, cascading from
+`User` so account deletion is a single `prisma.user.delete(...)` call.
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+npm run prisma:migrate   # create + apply a migration from schema changes (dev)
+npm run prisma:deploy    # apply existing migrations only (CI/prod)
+npm run prisma:generate  # regenerate the Prisma Client into src/generated/prisma
 ```
 
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+## Testing
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+npm test          # unit tests (Vitest, no database needed)
+npm run test:e2e  # e2e tests (Supertest against a real Postgres at DATABASE_URL_TEST)
+npm run lint
+npm run build
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+The e2e suite boots a full Nest app per spec file against `DATABASE_URL_TEST` (never
+`DATABASE_URL`) and drives it over HTTP: sign-up, email verification (the token is
+read back from the dev mail provider, not an inbox), sign-in, bearer-token access,
+settings/privacy round-trips, device and export ownership checks, and full account
+deletion.
 
-## Observability
+## Adding a data export contributor
 
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
+`POST /me/export` builds its JSON file from every provider in the app tagged with
+`@AsExportContributor()` — discovered at boot via Nest's `DiscoveryService`, so a new
+domain module never has to modify `DataExportModule`. To add one:
 
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
+```ts
+import { Injectable } from '@nestjs/common';
+import { AsExportContributor } from '../../common/export/export-contributor.decorator.js';
+import type { ExportContributor } from '../../common/export/export-contributor.interface.js';
 
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
+@Injectable()
+@AsExportContributor()
+export class TasksExportContributor implements ExportContributor {
+  readonly name = 'tasks'; // becomes the top-level key in the export JSON
 
-This project is already instrumented. Create a free account at [observe.nestjs.com](https://observe.nestjs.com), add an application, and paste the generated app key and secret into the `ObserveModule.forRoot()` call in `src/app.module.ts`.
+  async collect(userId: string) {
+    // return whatever JSON-serializable data this domain owns for the user
+  }
+}
+```
 
-The free plan needs no payment details and covers 300,000 events a month. You can also browse the [live demo](https://www.observe-demo.nestjs.com/dashboard) first - the whole dashboard over a busy service's data, with nothing to install.
+Register it as a provider in your own module (imported somewhere under `AppModule`)
+and it will show up in every future export automatically.
 
-## Resources
+## Adding a real mail provider
 
-Check out a few resources that may come in handy when working with NestJS:
+`MailModule` binds the `MAIL_PROVIDER` token to `DevMailProvider`, which logs emails
+to the console — this is the only implementation today. To send real email, add a
+class implementing `MailProvider` (`src/modules/mail/mail.interface.ts`) and swap the
+binding in `src/modules/mail/mail.module.ts`.
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observe](https://observe.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+## Local Postgres without Docker
 
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+If you can't run Docker, point `DATABASE_URL`/`DATABASE_URL_TEST` at any reachable
+Postgres 15+ and create both databases yourself; nothing else in this project assumes
+Docker specifically.

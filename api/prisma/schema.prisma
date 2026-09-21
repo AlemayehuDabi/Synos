@@ -1,0 +1,185 @@
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            String    @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  name          String
+  email         String
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  sessions      Session[]
+  accounts      Account[]
+
+  settings         UserSettings?
+  privacySettings  PrivacySettings?
+  devices          Device[]
+  dataExportJobs   DataExportJob[]
+  idempotencyKeys  IdempotencyKey[]
+
+  @@unique([email])
+  @@map("user")
+}
+
+model Session {
+  id        String   @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  expiresAt DateTime
+  token     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  accountId             String
+  providerId            String
+  userId                String    @db.Uuid
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+enum Units {
+  metric
+  imperial
+}
+
+enum Visibility {
+  private
+  shared
+}
+
+enum Platform {
+  ios
+  android
+}
+
+enum ExportFormat {
+  json
+}
+
+enum DataExportStatus {
+  queued
+  running
+  ready
+  failed
+  expired
+}
+
+model UserSettings {
+  id           String   @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  userId       String   @unique @db.Uuid
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  timezone     String   @default("UTC")
+  weekStartsOn Int      @default(1)
+  units        Units    @default(metric)
+  currency     String   @default("USD")
+  locale       String   @default("en-US")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("user_settings")
+}
+
+model PrivacySettings {
+  id        String     @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  userId    String     @unique @db.Uuid
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  calendar  Visibility @default(private)
+  tasks     Visibility @default(private)
+  habits    Visibility @default(private)
+  fitness   Visibility @default(private)
+  finances  Visibility @default(private)
+  meals     Visibility @default(private)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@map("privacy_settings")
+}
+
+model Device {
+  id         String   @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  userId     String   @db.Uuid
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform   Platform
+  pushToken  String   @unique
+  appVersion String?
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId])
+  @@map("devices")
+}
+
+model DataExportJob {
+  id          String           @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  userId      String           @db.Uuid
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status      DataExportStatus @default(queued)
+  format      ExportFormat     @default(json)
+  storageKey  String?
+  requestedAt DateTime         @default(now())
+  completedAt DateTime?
+  expiresAt   DateTime?
+  error       String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([userId])
+  @@map("data_export_jobs")
+}
+
+model IdempotencyKey {
+  id           String   @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  userId       String   @db.Uuid
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key          String
+  path         String
+  statusCode   Int
+  responseBody Json
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, key])
+  @@map("idempotency_keys")
+}

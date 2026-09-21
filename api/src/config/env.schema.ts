@@ -1,0 +1,39 @@
+import { z } from 'zod';
+
+export const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  PORT: z.coerce.number().int().positive().default(3000),
+
+  DATABASE_URL: z.url(),
+  DATABASE_URL_TEST: z.url().optional(),
+
+  BETTER_AUTH_SECRET: z.string().min(32, 'BETTER_AUTH_SECRET must be at least 32 characters'),
+  BETTER_AUTH_URL: z.url(),
+
+  CORS_ORIGINS: z.string().min(1, 'CORS_ORIGINS must list at least one allowed origin'),
+
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+
+  APPLE_CLIENT_ID: z.string().optional(),
+  APPLE_CLIENT_SECRET: z.string().optional(),
+  APPLE_APP_BUNDLE_IDENTIFIER: z.string().optional(),
+
+  MAIL_PROVIDER: z.enum(['dev']).default('dev'),
+  MAIL_FROM_ADDRESS: z.email(),
+
+  EXPORT_STORAGE_DIR: z.string().min(1),
+});
+
+export type Env = z.infer<typeof envSchema>;
+
+export function validateEnv(config: Record<string, unknown>): Env {
+  const result = envSchema.safeParse(config);
+  if (!result.success) {
+    const details = result.error.issues
+      .map((issue) => `  - ${issue.path.join('.') || '(root)'}: ${issue.message}`)
+      .join('\n');
+    throw new Error(`Invalid environment configuration:\n${details}`);
+  }
+  return result.data;
+}
