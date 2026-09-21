@@ -43,8 +43,9 @@ describe('buildCrossDomainSection', () => {
   });
 
   it('ignores kinds it does not report on', () => {
-    const section = buildCrossDomainSection({ suggestion_expired: 9 } as never);
+    const section = buildCrossDomainSection({ expired: 9, superseded: 3, suggestion_edited: 2, mode_changed: 1 });
     expect(crossDomainHasActivity(section)).toBe(false);
+    expect(section.highlights).toEqual([]);
   });
 
   it('writes highlights only for what happened, with correct plurals', () => {
