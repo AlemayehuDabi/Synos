@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { runWithTimeout } from '../common/async/run-with-timeout.js';
 import type { SignalDomain } from '../generated/prisma/enums.js';
 import {
   type TodayContext,
@@ -12,8 +13,6 @@ import { TodayRegistryService } from './today-registry.service.js';
 export type TodaySection =
   | { domain: SignalDomain; status: 'ok'; summary: Record<string, unknown>; items: TodayItem[] }
   | { domain: SignalDomain; status: 'error' | 'timeout' };
-
-const TIMED_OUT = Symbol('timed out');
 
 @Injectable()
 export class TodayAggregatorService {
@@ -44,33 +43,22 @@ export class TodayAggregatorService {
     context: TodayContext,
     timeoutMs: number,
   ): Promise<TodaySection> {
-    let timer: NodeJS.Timeout | undefined;
-    const timeout = new Promise<typeof TIMED_OUT>((resolve) => {
-      timer = setTimeout(() => resolve(TIMED_OUT), timeoutMs);
-    });
-    // Run inside an async wrapper so a synchronous throw is captured too, and keep a
-    // handler attached: if the timeout wins, this promise may still reject later.
-    const work = (async () => contributor.collect(context))();
-    work.catch(() => undefined);
+    const outcome = await runWithTimeout(() => contributor.collect(context), timeoutMs);
 
-    try {
-      const outcome = await Promise.race([work, timeout]);
-      if (outcome === TIMED_OUT) {
-        // Ids only: what a contributor returns is user data and is never logged.
-        this.logger.warn(`Today contributor "${domain}" timed out for user ${context.userId}`);
-        return { domain, status: 'timeout' };
-      }
-      const parsed = todayContributionSchema.safeParse(outcome);
-      if (!parsed.success) {
-        this.logger.warn(`Today contributor "${domain}" returned a malformed result for user ${context.userId}`);
-        return { domain, status: 'error' };
-      }
-      return { domain, status: 'ok', summary: parsed.data.summary, items: parsed.data.items as TodayItem[] };
-    } catch {
+    // Ids only in the logs: what a contributor returns is user data and is never logged.
+    if (outcome.status === 'timeout') {
+      this.logger.warn(`Today contributor "${domain}" timed out for user ${context.userId}`);
+      return { domain, status: 'timeout' };
+    }
+    if (outcome.status === 'error') {
       this.logger.warn(`Today contributor "${domain}" failed for user ${context.userId}`);
       return { domain, status: 'error' };
-    } finally {
-      clearTimeout(timer);
     }
+    const parsed = todayContributionSchema.safeParse(outcome.value);
+    if (!parsed.success) {
+      this.logger.warn(`Today contributor "${domain}" returned a malformed result for user ${context.userId}`);
+      return { domain, status: 'error' };
+    }
+    return { domain, status: 'ok', summary: parsed.data.summary, items: parsed.data.items as TodayItem[] };
   }
 }
