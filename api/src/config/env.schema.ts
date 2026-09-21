@@ -23,6 +23,12 @@ export const envSchema = z.object({
   MAIL_FROM_ADDRESS: z.email(),
 
   EXPORT_STORAGE_DIR: z.string().min(1),
+
+  MAX_PENDING_PER_CONNECTION: z.coerce.number().int().positive().default(20),
+  SIGNAL_RETENTION_DAYS: z.coerce.number().int().positive().default(180),
+  SUGGESTION_RETENTION_DAYS: z.coerce.number().int().positive().default(180),
+  ACTIVITY_RETENTION_DAYS: z.coerce.number().int().positive().default(730),
+  UNDO_WINDOW_DAYS: z.coerce.number().int().positive().default(30),
 });
 
 export type Env = z.infer<typeof envSchema>;

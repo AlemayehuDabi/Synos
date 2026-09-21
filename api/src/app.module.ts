@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ScheduleModule } from '@nestjs/schedule';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { createObserveModule } from '@nestjs/observe';
 import { ConfigModule } from './config/config.module.js';
 import { PrismaModule } from './modules/prisma/prisma.module.js';
@@ -9,6 +10,7 @@ import { MailModule } from './modules/mail/mail.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { MeModule } from './modules/me/me.module.js';
 import { DevicesModule } from './modules/devices/devices.module.js';
+import { SignalEngineModule } from './signal-engine/signal-engine.module.js';
 import { HealthController } from './common/health/health.controller.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
 
@@ -25,12 +27,14 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
       serviceId: 'api',
     }),
     ScheduleModule.forRoot(),
+    EventEmitterModule.forRoot(),
     ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 60 }]),
     PrismaModule,
     MailModule,
     AuthModule,
     MeModule,
     DevicesModule,
+    SignalEngineModule,
   ],
   controllers: [HealthController],
   providers: [
