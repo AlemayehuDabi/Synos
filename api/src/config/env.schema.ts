@@ -29,6 +29,17 @@ export const envSchema = z.object({
   SUGGESTION_RETENTION_DAYS: z.coerce.number().int().positive().default(180),
   ACTIVITY_RETENTION_DAYS: z.coerce.number().int().positive().default(730),
   UNDO_WINDOW_DAYS: z.coerce.number().int().positive().default(30),
+
+  TODAY_CONTRIBUTOR_TIMEOUT_MS: z.coerce.number().int().positive().default(1500),
+
+  REVIEW_CONTRIBUTOR_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+  REVIEW_GENERATION_BATCH_SIZE: z.coerce.number().int().positive().max(1000).default(100),
+
+  NOTIFICATION_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
+  INBOX_PUSH_MIN_INTERVAL_SECONDS: z.coerce.number().int().nonnegative().default(60),
+  PUSH_PROVIDER: z.enum(['dev']).default('dev'),
+  PUSH_MAX_ATTEMPTS: z.coerce.number().int().positive().max(10).default(3),
+  PUSH_RETRY_BASE_DELAY_MS: z.coerce.number().int().nonnegative().default(1000),
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -11,6 +11,8 @@ import { AuthModule } from './modules/auth/auth.module.js';
 import { MeModule } from './modules/me/me.module.js';
 import { DevicesModule } from './modules/devices/devices.module.js';
 import { SignalEngineModule } from './signal-engine/signal-engine.module.js';
+import { JobsModule } from './common/jobs/jobs.module.js';
+import { LocksModule } from './common/locks/locks.module.js';
 import { HealthController } from './common/health/health.controller.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
 
@@ -30,6 +32,8 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
     EventEmitterModule.forRoot(),
     ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 60 }]),
     PrismaModule,
+    JobsModule,
+    LocksModule,
     MailModule,
     AuthModule,
     MeModule,
