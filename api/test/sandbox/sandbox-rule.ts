@@ -27,6 +27,13 @@ interface BillDuePayload {
 export class SandboxBillRule implements ConnectionRule {
   async evaluate(ctx: RuleContext): Promise<ProposalDraft[]> {
     const payload = ctx.signal.payload as BillDuePayload;
+
+    // Simulates a rule-level failure (as opposed to a handler-level one), the
+    // kind the sweeper's retry/backoff and max-attempts logic exists for.
+    if (payload.billId.startsWith('rule-throws-')) {
+      throw new Error('sandbox rule intentionally threw');
+    }
+
     const actionType = pickActionType(payload.billId);
 
     return [
