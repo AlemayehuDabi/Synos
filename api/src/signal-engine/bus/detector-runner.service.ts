@@ -1,7 +1,7 @@
 import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob } from 'cron';
-import { PrismaService } from '../../lib/prisma.js';
+import { AdvisoryLockService } from '../../common/locks/advisory-lock.service.js';
 import { SignalRegistryService } from '../registry/registry.service.js';
 import type { SignalDetector } from '../registry/signal-detector.js';
 
@@ -9,8 +9,8 @@ import type { SignalDetector } from '../registry/signal-detector.js';
  * Schedules every discovered @SignalDetector on its own cron expression
  * (registered dynamically via SchedulerRegistry, since decorators can't carry
  * a per-instance cron string known only at runtime). Each tick is wrapped in
- * a transaction holding a Postgres transaction-scoped advisory lock keyed by
- * the detector's name, so two API instances never run the same detector at
+ * the shared advisory lock (see AdvisoryLockService) keyed by the detector's
+ * name, so two API instances never run the same detector at
  * the same time - only one instance's lock attempt succeeds per tick.
  */
 @Injectable()
@@ -20,7 +20,7 @@ export class DetectorRunnerService implements OnApplicationBootstrap {
   constructor(
     private readonly registry: SignalRegistryService,
     private readonly schedulerRegistry: SchedulerRegistry,
-    private readonly prisma: PrismaService,
+    private readonly locks: AdvisoryLockService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -44,16 +44,10 @@ export class DetectorRunnerService implements OnApplicationBootstrap {
 
   private async runWithLock(name: string, instance: SignalDetector): Promise<void> {
     try {
-      await this.prisma.$transaction(async (tx) => {
-        const [row] = await tx.$queryRaw<{ locked: boolean }[]>`
-          SELECT pg_try_advisory_xact_lock(hashtext(${`signal_detector:${name}`})::bigint) AS locked
-        `;
-        if (!row?.locked) {
-          this.logger.debug(`Detector "${name}" already running elsewhere; skipping this tick`);
-          return;
-        }
-        await instance.run();
-      });
+      const ran = await this.locks.runExclusive(`signal_detector:${name}`, () => instance.run());
+      if (!ran) {
+        this.logger.debug(`Detector "${name}" already running elsewhere; skipping this tick`);
+      }
     } catch (error) {
       this.logger.error(`Detector "${name}" failed: ${error instanceof Error ? error.message : String(error)}`);
     }

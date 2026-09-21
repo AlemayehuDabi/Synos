@@ -3,7 +3,7 @@ import { DiscoveryService } from '@nestjs/core';
 import { PrismaService } from '../../lib/prisma.js';
 import { EXPORT_CONTRIBUTOR_METADATA } from '../../common/export/export-contributor.decorator.js';
 import type { ExportContributor } from '../../common/export/export-contributor.interface.js';
-import { JobRunner } from './job-runner.js';
+import { JobRunner } from '../../common/jobs/job-runner.js';
 import { StorageService } from './storage.service.js';
 
 const EXPORT_TTL_MS = 24 * 60 * 60 * 1000;
