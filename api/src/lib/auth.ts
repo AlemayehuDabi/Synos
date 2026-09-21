@@ -5,9 +5,13 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '../generated/prisma/client.js';
 import { DevMailProvider } from '../modules/mail/dev-mail.provider.js';
 
-const prisma = new PrismaClient({
+// A separate PrismaClient/connection pool from PrismaService's, because this
+// module is a plain singleton the Better Auth CLI also imports directly,
+// outside of Nest's DI container. AuthModule disconnects it on shutdown.
+export const authPrisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
 });
+const prisma = authPrisma;
 
 const mailProvider = new DevMailProvider();
 

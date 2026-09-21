@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { type INestApplication, ValidationPipe } from '@nestjs/common';
+import { type INestApplication, type Type, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { vi } from 'vitest';
@@ -9,13 +9,16 @@ import type { MailMessage } from '../../src/modules/mail/mail.interface.js';
 
 export type SentMail = MailMessage;
 
-export async function createTestApp(): Promise<{ app: INestApplication; sentMails: SentMail[] }> {
+/** `extraModules` lets signal-engine specs bolt on the test-only SandboxModule. */
+export async function createTestApp(
+  extraModules: Type[] = [],
+): Promise<{ app: INestApplication; sentMails: SentMail[] }> {
   const sentMails: SentMail[] = [];
   vi.spyOn(DevMailProvider.prototype, 'send').mockImplementation(async (message: MailMessage) => {
     sentMails.push(message);
   });
 
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+  const moduleRef = await Test.createTestingModule({ imports: [AppModule, ...extraModules] }).compile();
   const app = moduleRef.createNestApplication();
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
   app.setGlobalPrefix('api/v1', {

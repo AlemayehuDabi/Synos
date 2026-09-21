@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, UseInterceptors } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { CurrentUser, type CurrentUserType } from '../../common/decorators/current-user.decorator.js';
 import { IdempotencyInterceptor } from '../../common/idempotency/idempotency.interceptor.js';
@@ -39,18 +39,21 @@ export class InboxController {
   }
 
   @Post(':id/approve')
+  @HttpCode(HttpStatus.OK)
   @UseInterceptors(IdempotencyInterceptor)
   approve(@CurrentUser() user: CurrentUserType, @Param('id') id: string, @Body() dto: ApproveSuggestionDto) {
     return this.suggestionsService.approve(user.id, id, dto.params);
   }
 
   @Post(':id/dismiss')
+  @HttpCode(HttpStatus.OK)
   @UseInterceptors(IdempotencyInterceptor)
   dismiss(@CurrentUser() user: CurrentUserType, @Param('id') id: string, @Body() dto: DismissSuggestionDto) {
     return this.suggestionsService.dismiss(user.id, id, dto.reason);
   }
 
   @Post('bulk')
+  @HttpCode(HttpStatus.OK)
   @UseInterceptors(IdempotencyInterceptor)
   bulk(@CurrentUser() user: CurrentUserType, @Body() dto: BulkInboxDto) {
     return this.suggestionsService.bulk(user.id, dto.action, dto.ids);

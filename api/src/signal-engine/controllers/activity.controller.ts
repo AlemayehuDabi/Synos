@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Post, Query, UseInterceptors } from '@nestjs/common';
+import { Controller, Get, HttpCode, HttpStatus, Param, Post, Query, UseInterceptors } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { CurrentUser, type CurrentUserType } from '../../common/decorators/current-user.decorator.js';
 import { IdempotencyInterceptor } from '../../common/idempotency/idempotency.interceptor.js';
@@ -30,6 +30,7 @@ export class ActivityController {
   }
 
   @Post(':id/undo')
+  @HttpCode(HttpStatus.OK)
   @UseInterceptors(IdempotencyInterceptor)
   undo(@CurrentUser() user: CurrentUserType, @Param('id') id: string) {
     return this.suggestionsService.undoActivity(user.id, id);
