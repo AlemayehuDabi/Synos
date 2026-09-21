@@ -1,9 +1,14 @@
 # Synos API
 
-The NestJS backend for Synos. This slice of the project covers **authentication and
-account management** only: sign-up/sign-in, sessions, profile, settings, privacy,
-devices, data export, and account deletion. No domain features (tasks, habits,
-etc.) live here yet.
+The NestJS backend for Synos. Two things live here so far:
+
+- **Auth & account management**: sign-up/sign-in, sessions, profile, settings,
+  privacy, devices, data export, and account deletion.
+- **Signal engine**: the cross-domain automation layer domain modules (tasks,
+  habits, fitness, finances, meals, calendar) will plug into once they exist.
+  See [Signal engine](#signal-engine) below.
+
+No domain features themselves live here yet.
 
 ## Stack
 
@@ -86,8 +91,10 @@ npm run build
 The e2e suite boots a full Nest app per spec file against `DATABASE_URL_TEST` (never
 `DATABASE_URL`) and drives it over HTTP: sign-up, email verification (the token is
 read back from the dev mail provider, not an inbox), sign-in, bearer-token access,
-settings/privacy round-trips, device and export ownership checks, and full account
-deletion.
+settings/privacy round-trips, device and export ownership checks, full account
+deletion, and the full signal engine lifecycle (suggest/auto modes, approvals,
+undo, conflicts, dedupe, retries, retention, and cross-user isolation) using the
+test-only sandbox fixtures under `test/sandbox/`.
 
 ## Adding a data export contributor
 
@@ -120,6 +127,264 @@ and it will show up in every future export automatically.
 to the console — this is the only implementation today. To send real email, add a
 class implementing `MailProvider` (`src/modules/mail/mail.interface.ts`) and swap the
 binding in `src/modules/mail/mail.module.ts`.
+
+## Signal engine
+
+`src/signal-engine/` is a domain-agnostic automation layer. Domain modules never
+write into each other directly; instead they emit **signals**, the engine's
+**rules** turn signals into **suggestions**, the user (or an `auto`-mode
+connection) approves them, and an **action handler** applies the change:
+
+```
+domain module                signal engine                          domain module
+──────────────                ────────────────────────────────       ──────────────
+                 emit()
+ e.g. finances  ───────▶  Signal (append-only)
+ "bill.due"                    │
+                               ▼
+                     sweeper cron / fast path
+                     (SignalProcessorService)
+                               │
+                for each connection listening to this signal type
+                               ▼
+                     ConnectionRule.evaluate()
+                               │
+                       ProposalDraft[]
+                               │
+                mode=off              mode=suggest           mode=auto
+                (nothing,        ┌─────────────┐        ┌───────────────────┐
+                 signal is       │  Suggestion  │        │ Suggestion created │
+                 still logged)   │   (pending)  │        │  + ActionHandler   │
+                                 └──────┬───────┘        │   .apply() now     │
+                                        │                └─────────┬──────────┘
+                          user approves/edits/dismisses            │
+                          via /inbox, or it expires                │
+                                        ▼                          ▼
+                              ActionHandler.apply() ──────▶ e.g. tasks domain
+                                        │                    (writes its own data)
+                                        ▼
+                                  ActivityLog
+                          (auditable, undoable via
+                           POST /activity/:id/undo)
+```
+
+A manual edit in a domain module always wins: call `supersedePending()` when a
+manual write should cancel a pending suggestion for the same target, and
+`recordCorrection()` when it corrects something an auto-applied suggestion
+already did. An action handler must never silently overwrite a manual value —
+report `{ outcome: 'conflict' }` instead.
+
+### Emitting a signal
+
+Add the signal's shape to `src/signal-engine/catalog/signals.ts` if it's not
+there yet (this catalog is intentionally hand-maintained, like the connection
+catalog below), then call the facade — the only thing a domain module imports
+from the engine to produce signals:
+
+```ts
+import { SignalEngineFacade } from '../../signal-engine/index.js';
+
+@Injectable()
+export class BillsService {
+  constructor(private readonly signalEngine: SignalEngineFacade) {}
+
+  async markBillDue(userId: string, bill: Bill) {
+    // Inside your own transaction: pass `tx` and the row commits atomically with
+    // whatever else you're doing. The signal is then only picked up by the sweeper
+    // cron (never the instant, in-process fast path) once your transaction commits -
+    // Prisma's interactive transactions have no reliable "after commit" hook, so this
+    // is the simplest correct way to avoid processing a signal that might still roll back.
+    await this.signalEngine.emit(
+      {
+        userId,
+        type: 'bill.due',
+        payload: { billId: bill.id, dueDate: bill.dueDate, amountCents: bill.amountCents, currency: bill.currency, daysUntilDue: 3 },
+      },
+      tx,
+    );
+  }
+}
+```
+
+Outside of a transaction, omit the `tx` argument and the signal is processed
+immediately (in-process fast path), with the sweeper cron as a durable backstop.
+
+### Writing a ConnectionRule
+
+A connection's rule turns one signal into zero or more proposed suggestions.
+Connections themselves are fixed in `catalog/connections.ts` (see "Pairs that
+add no value are deliberately not connected" in the architecture — this list is
+curated, not user- or module-extensible). Implement the rule for an existing
+connection ID as a decorated provider anywhere reachable from `AppModule`:
+
+```ts
+import { Injectable } from '@nestjs/common';
+import { ConnectionRule, type ProposalDraft, type RuleContext } from '../../signal-engine/index.js';
+
+@Injectable()
+@ConnectionRule('bill-to-reminder')
+export class BillToReminderRule implements ConnectionRule {
+  async evaluate(ctx: RuleContext): Promise<ProposalDraft[]> {
+    const bill = ctx.signal.payload as { billId: string; dueDate: string };
+    return [
+      {
+        title: `Pay ${bill.billId} by ${bill.dueDate}`,
+        body: 'Auto-generated from an upcoming bill.',
+        actionType: 'tasks.create-reminder',
+        params: { billId: bill.billId, dueDate: bill.dueDate },
+        targetKey: `bill-reminder:${bill.billId}`,
+        dedupeKey: `${ctx.signal.id}:tasks.create-reminder`,
+      },
+    ];
+  }
+}
+```
+
+### Writing an ActionHandler
+
+```ts
+import { Injectable } from '@nestjs/common';
+import { z } from 'zod';
+import { ActionHandler, type ActionHandlerContext, type ApplyResult, type RevertResult } from '../../signal-engine/index.js';
+
+const paramsSchema = z.object({ billId: z.string(), dueDate: z.iso.date() });
+
+@Injectable()
+@ActionHandler('tasks.create-reminder')
+export class CreateReminderHandler implements ActionHandler<z.infer<typeof paramsSchema>> {
+  readonly actionType = 'tasks.create-reminder';
+  readonly targetDomain = 'tasks';
+  readonly paramsSchema = paramsSchema;
+  readonly supportsRevert = true;
+
+  constructor(private readonly tasks: TasksService) {}
+
+  async apply(ctx: ActionHandlerContext, params: z.infer<typeof paramsSchema>): Promise<ApplyResult> {
+    const existing = await this.tasks.findManualReminder(ctx.tx, params.billId);
+    if (existing) return { outcome: 'conflict', reason: 'A reminder already exists for this bill' };
+
+    const task = await this.tasks.createReminder(ctx.tx, params);
+    return { outcome: 'applied', entityRef: { type: 'task', id: task.id }, after: task, revertData: { taskId: task.id } };
+  }
+
+  async revert(ctx: ActionHandlerContext, revertData: { taskId: string }): Promise<RevertResult> {
+    await this.tasks.deleteReminder(ctx.tx, revertData.taskId);
+    return { outcome: 'reverted' };
+  }
+}
+```
+
+`ctx.tx` is the same Prisma transaction the suggestion's status change and
+activity log entry are written in — use it for every write so an unexpected
+error rolls everything back together.
+
+### Writing a SignalDetector
+
+For time-based signals (a bill becoming due, a task going overdue) rather than
+event-driven ones:
+
+```ts
+import { Injectable } from '@nestjs/common';
+import { SignalDetector } from '../../signal-engine/index.js';
+
+@Injectable()
+@SignalDetector({ name: 'bill-due-detector', cron: '0 * * * *' }) // every hour
+export class BillDueDetector implements SignalDetector {
+  constructor(private readonly signalEngine: SignalEngineFacade, private readonly bills: BillsService) {}
+
+  async run(): Promise<void> {
+    for (const bill of await this.bills.findDueSoon()) {
+      await this.signalEngine.emit({ userId: bill.userId, type: 'bill.due', payload: { ... }, dedupeKey: `bill-due:${bill.id}:${todayIso()}` });
+    }
+  }
+}
+```
+
+The engine schedules it and wraps every run in a Postgres transaction-scoped
+advisory lock keyed by `name`, so if you ever run more than one API instance,
+only one of them executes a given detector per tick.
+
+### Boot-time checks
+
+Duplicate `@ConnectionRule`/`@ActionHandler`/`@SignalDetector` registrations, a
+rule pointing at an unknown connection, and a handler whose `actionType`
+property doesn't match its decorator argument all throw at startup. A
+connection with no registered rule yet doesn't throw — it just reports
+`available: false` from `GET /connections` and logs one warning at boot.
+
+### Environment variables
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `MAX_PENDING_PER_CONNECTION` | `20` | Oldest pending suggestions are expired once a connection exceeds this per user |
+| `SIGNAL_RETENTION_DAYS` | `180` | Processed signals older than this are pruned daily |
+| `SUGGESTION_RETENTION_DAYS` | `180` | Resolved (non-pending) suggestions older than this are pruned daily |
+| `ACTIVITY_RETENTION_DAYS` | `730` | Activity log entries — the audit trail — are kept far longer |
+| `UNDO_WINDOW_DAYS` | `30` | How long after an approved/auto-applied action `POST /activity/:id/undo` still works |
+
+### Decisions
+
+Where the spec was ambiguous or a library behaved differently than expected,
+here's what was chosen and why:
+
+- **Signal catalog is extensible, the connection catalog is not.** The brief
+  fixes the connection catalog in code (deliberately: some domain pairs, like
+  fitness and finances, are never connected). Signal *types* are different —
+  new domains are expected to add their own over time — so
+  `catalog/signals.ts` exposes `registerSignalType()` as a real extension
+  point a future domain module calls from its own code, the same mechanism the
+  test-only sandbox fixtures use for their fake signal type.
+- **The fast path awaits `EventEmitter2.emitAsync`, not `emit`.** Plain
+  `emit()` doesn't wait for async listeners, which made `facade.emit()`
+  racy from the caller's perspective (including in tests). Awaiting
+  `emitAsync` makes the fast-path attempt finish before `emit()` resolves,
+  without weakening durability — a failure there still falls back to the
+  sweeper.
+- **Signals emitted inside a transaction skip the fast path entirely.**
+  Prisma's interactive transactions have no "after commit" hook to dispatch
+  from safely, so the simplest correct option is: only the sweeper (which only
+  ever reads committed rows) processes transactionally-emitted signals.
+- **The sweeper claims a batch, then processes each signal in its own
+  transaction**, rather than holding one `SELECT ... FOR UPDATE SKIP LOCKED`
+  transaction open for the whole batch. Claiming (bumping `attempts`/backoff)
+  is a short transaction; a crash mid-batch only affects whatever was actually
+  being processed at that moment, not the rest of the claimed batch.
+- **Detector locks use `pg_try_advisory_xact_lock` (transaction-scoped), not
+  the session-scoped variant.** With a pooled driver adapter, a session-scoped
+  lock and its unlock call can land on two different physical connections,
+  which would make the lock unreliable. A transaction-scoped lock is tied to
+  one connection for its whole (bounded) lifetime by construction.
+- **Auto-mode failures downgrade gracefully; manual-approval failures don't.**
+  Per the spec: if an `auto` connection's handler throws or returns `noop`,
+  the suggestion stays `pending` with a `failureNote` (suggest-first
+  fallback). A *manual* `POST /inbox/:id/approve` that hits a handler throw
+  instead marks the suggestion `failed` and returns 422 — the user explicitly
+  asked for this one action, so silent downgrade would be surprising.
+  `noop` on manual approval is treated the same as `conflict` (409,
+  superseded): there's nothing left to apply, so the item can't stay pending.
+- **`POST /inbox/:id/approve`, `/dismiss`, `/bulk`, and
+  `/activity/:id/undo` return 200**, not Nest's default 201 for POST. They
+  resolve or mutate an existing resource rather than creating one; the spec
+  states 200 explicitly for `approve`, and the others follow the same
+  convention for consistency.
+- **A dismiss reason is stored on the `ActivityLog` entry, not on
+  `Suggestion.supersededReason`** — that field's name and the spec's usage
+  both tie it to the system-superseded case specifically.
+- **`GET /inbox/:id`'s "status history" is the suggestion's own
+  `ActivityLog` entries**, not a separate history table — the audit log
+  already is that history.
+- **Fixed a pre-existing connection leak while adding e2e coverage**:
+  `lib/auth.ts` (from the earlier auth task) creates its own `PrismaClient`
+  outside Nest's DI, since the Better Auth CLI also imports it directly. It was
+  never disconnected on shutdown, which surfaced as `ECONNREFUSED` once enough
+  e2e spec files ran in one process. `AuthModule` now disconnects it in
+  `onModuleDestroy`.
+- **The pending-cap e2e test exercises the real default (20), not a mocked
+  lower value.** `ConfigModule.forRoot()` resolves its validated env config
+  once, at first import, for the whole process — correct for a real running
+  app, but it means `process.env` overrides set inside a test don't reach an
+  app created later in the same Vitest worker. This is a testing-ergonomics
+  limitation of that pattern, not a product bug.
 
 ## Local Postgres without Docker
 
