@@ -25,6 +25,11 @@ model User {
   dataExportJobs   DataExportJob[]
   idempotencyKeys  IdempotencyKey[]
 
+  signals            Signal[]
+  suggestions        Suggestion[]
+  connectionSettings ConnectionSetting[]
+  activityLogs       ActivityLog[]
+
   @@unique([email])
   @@map("user")
 }
@@ -182,4 +187,152 @@ model IdempotencyKey {
 
   @@unique([userId, key])
   @@map("idempotency_keys")
+}
+
+// ---------------------------------------------------------------------------
+// Signal engine
+// ---------------------------------------------------------------------------
+
+enum SignalDomain {
+  calendar
+  tasks
+  habits
+  fitness
+  finances
+  meals
+  system
+}
+
+enum SuggestionStatus {
+  pending
+  approved
+  dismissed
+  superseded
+  expired
+  failed
+  auto_applied
+  reverted
+}
+
+enum ConnectionMode {
+  off
+  suggest
+  auto
+}
+
+enum ResolvedBy {
+  user
+  system
+}
+
+enum ActivityKind {
+  suggestion_created
+  suggestion_edited
+  suggestion_approved
+  suggestion_dismissed
+  auto_applied
+  superseded
+  expired
+  reverted
+  manual_override
+  mode_changed
+}
+
+/// Append-only signal log. Rows are only ever updated to record processing
+/// progress (processedAt/attempts/nextAttemptAt/lastError); payload/type/etc.
+/// never change after creation.
+model Signal {
+  id            String       @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  userId        String       @db.Uuid
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type          String
+  sourceDomain  SignalDomain
+  schemaVersion Int          @default(1)
+  payload       Json
+  subjectType   String?
+  subjectId     String?
+  dedupeKey     String?
+  occurredAt    DateTime
+  processedAt   DateTime?
+  attempts      Int          @default(0)
+  nextAttemptAt DateTime?
+  lastError     String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  suggestions  Suggestion[]
+  activityLogs ActivityLog[]
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, occurredAt])
+  @@index([userId, type, occurredAt])
+  @@index([processedAt, nextAttemptAt])
+  @@map("signals")
+}
+
+model Suggestion {
+  id               String            @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  userId           String            @db.Uuid
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  signalId         String?           @db.Uuid
+  signal           Signal?           @relation(fields: [signalId], references: [id], onDelete: SetNull)
+  connectionId     String
+  targetDomain     SignalDomain
+  actionType       String
+  title            String
+  body             String
+  params           Json
+  originalParams   Json?
+  targetKey        String
+  dedupeKey        String
+  status           SuggestionStatus  @default(pending)
+  failureNote      String?
+  expiresAt        DateTime
+  resolvedAt       DateTime?
+  resolvedBy       ResolvedBy?
+  supersededReason String?
+  revertData       Json?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  activityLogs ActivityLog[]
+
+  @@unique([userId, connectionId, dedupeKey])
+  @@index([userId, status, createdAt])
+  @@index([userId, targetKey, status])
+  @@map("suggestions")
+}
+
+model ConnectionSetting {
+  id           String         @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  userId       String         @db.Uuid
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  connectionId String
+  mode         ConnectionMode
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@unique([userId, connectionId])
+  @@map("connection_settings")
+}
+
+model ActivityLog {
+  id           String        @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  userId       String        @db.Uuid
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind         ActivityKind
+  suggestionId String?       @db.Uuid
+  suggestion   Suggestion?   @relation(fields: [suggestionId], references: [id], onDelete: SetNull)
+  signalId     String?       @db.Uuid
+  signal       Signal?       @relation(fields: [signalId], references: [id], onDelete: SetNull)
+  connectionId String?
+  targetDomain SignalDomain?
+  entityRef    Json?
+  before       Json?
+  after        Json?
+  undoneAt     DateTime?
+  createdAt    DateTime      @default(now())
+
+  @@index([userId, createdAt])
+  @@map("activity_logs")
 }
