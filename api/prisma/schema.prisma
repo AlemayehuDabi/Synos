@@ -1,4 +1,3 @@
-
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
@@ -19,16 +18,22 @@ model User {
   sessions      Session[]
   accounts      Account[]
 
-  settings         UserSettings?
-  privacySettings  PrivacySettings?
-  devices          Device[]
-  dataExportJobs   DataExportJob[]
-  idempotencyKeys  IdempotencyKey[]
+  settings        UserSettings?
+  privacySettings PrivacySettings?
+  devices         Device[]
+  dataExportJobs  DataExportJob[]
+  idempotencyKeys IdempotencyKey[]
 
   signals            Signal[]
   suggestions        Suggestion[]
   connectionSettings ConnectionSetting[]
   activityLogs       ActivityLog[]
+
+  reviews                   Review[]
+  notifications             Notification[]
+  notificationPreferences   NotificationPreference[]
+  notificationSettings      NotificationSettings?
+  notificationPushThrottles NotificationPushThrottle[]
 
   @@unique([email])
   @@map("user")
@@ -271,11 +276,11 @@ model Signal {
 }
 
 model Suggestion {
-  id               String            @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
-  userId           String            @db.Uuid
-  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  signalId         String?           @db.Uuid
-  signal           Signal?           @relation(fields: [signalId], references: [id], onDelete: SetNull)
+  id               String           @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  userId           String           @db.Uuid
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  signalId         String?          @db.Uuid
+  signal           Signal?          @relation(fields: [signalId], references: [id], onDelete: SetNull)
   connectionId     String
   targetDomain     SignalDomain
   actionType       String
@@ -285,15 +290,15 @@ model Suggestion {
   originalParams   Json?
   targetKey        String
   dedupeKey        String
-  status           SuggestionStatus  @default(pending)
+  status           SuggestionStatus @default(pending)
   failureNote      String?
   expiresAt        DateTime
   resolvedAt       DateTime?
   resolvedBy       ResolvedBy?
   supersededReason String?
   revertData       Json?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
   activityLogs ActivityLog[]
 
@@ -335,4 +340,109 @@ model ActivityLog {
 
   @@index([userId, createdAt])
   @@map("activity_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Reviews
+// ---------------------------------------------------------------------------
+
+enum ReviewType {
+  weekly
+  monthly
+}
+
+/// A generated weekly/monthly review. periodStart/periodEnd are the local
+/// calendar dates (in `timezone`) the review covers, both inclusive.
+model Review {
+  id          String     @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  userId      String     @db.Uuid
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        ReviewType
+  periodStart DateTime   @db.Date
+  periodEnd   DateTime   @db.Date
+  timezone    String
+  sections    Json
+  generatedAt DateTime   @default(now())
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@unique([userId, type, periodStart])
+  @@index([userId, generatedAt])
+  @@map("reviews")
+}
+
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+enum NotificationCategory {
+  inbox_suggestion
+  review_ready
+  bill
+  reminder
+  system
+}
+
+model Notification {
+  id        String               @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  userId    String               @db.Uuid
+  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category  NotificationCategory
+  domain    SignalDomain?
+  title     String
+  body      String
+  data      Json                 @default("{}")
+  dedupeKey String?
+  readAt    DateTime?
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+  @@index([readAt])
+  @@map("notifications")
+}
+
+model NotificationPreference {
+  id        String               @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  userId    String               @db.Uuid
+  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category  NotificationCategory
+  inApp     Boolean              @default(true)
+  push      Boolean              @default(true)
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+
+  @@unique([userId, category])
+  @@map("notification_preferences")
+}
+
+/// User-level notification settings (1:1). Quiet hours are "HH:mm" in the
+/// user's own timezone (UserSettings.timezone); both null means disabled.
+model NotificationSettings {
+  id              String   @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  userId          String   @unique @db.Uuid
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  quietHoursStart String?
+  quietHoursEnd   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("notification_settings")
+}
+
+/// Rate limiter state for pushes: one row per (user, category) recording when a
+/// push last went out, claimed with an atomic upsert so it holds across API instances.
+model NotificationPushThrottle {
+  id           String               @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  userId       String               @db.Uuid
+  user         User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category     NotificationCategory
+  lastPushedAt DateTime
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  @@unique([userId, category])
+  @@map("notification_push_throttles")
 }
