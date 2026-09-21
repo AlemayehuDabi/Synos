@@ -70,8 +70,12 @@ npx auth generate --config src/lib/auth.ts -y   # regenerates Better Auth's mode
 ```
 
 Everything else (`UserSettings`, `PrivacySettings`, `Device`, `DataExportJob`,
-`IdempotencyKey`) is hand-written below those generated models, cascading from
-`User` so account deletion is a single `prisma.user.delete(...)` call.
+`IdempotencyKey`, and the signal engine's `Signal`, `Suggestion`,
+`ConnectionSetting` and `ActivityLog`) is hand-written below those generated
+models, cascading from `User` so account deletion is a single
+`prisma.user.delete(...)` call. One migration
+(`*_signals_append_only`) is hand-written SQL, because Prisma can't express a
+trigger.
 
 ```bash
 npm run prisma:migrate   # create + apply a migration from schema changes (dev)
@@ -94,7 +98,9 @@ read back from the dev mail provider, not an inbox), sign-in, bearer-token acces
 settings/privacy round-trips, device and export ownership checks, full account
 deletion, and the full signal engine lifecycle (suggest/auto modes, approvals,
 undo, conflicts, dedupe, retries, retention, and cross-user isolation) using the
-test-only sandbox fixtures under `test/sandbox/`.
+test-only sandbox fixtures under `test/sandbox/`. Better Auth's sign-up/sign-in
+rate limits stay enabled in e2e (5 per minute), so keep each spec file to at most
+5 `signUpAndVerify` calls.
 
 ## Adding a data export contributor
 
@@ -176,10 +182,11 @@ report `{ outcome: 'conflict' }` instead.
 
 ### Emitting a signal
 
-Add the signal's shape to `src/signal-engine/catalog/signals.ts` if it's not
-there yet (this catalog is intentionally hand-maintained, like the connection
-catalog below), then call the facade — the only thing a domain module imports
-from the engine to produce signals:
+The signal type must exist in the catalog: either add it to
+`src/signal-engine/catalog/signals.ts`, or — from inside your own module,
+without editing engine code — call `registerSignalType(type, { sourceDomain,
+schemaVersion, payloadSchema })` once at startup. Then call the facade, the only
+thing a domain module imports from the engine to produce signals:
 
 ```ts
 import { SignalEngineFacade } from '../../signal-engine/index.js';
@@ -285,7 +292,7 @@ event-driven ones:
 
 ```ts
 import { Injectable } from '@nestjs/common';
-import { SignalDetector } from '../../signal-engine/index.js';
+import { SignalDetector, SignalEngineFacade } from '../../signal-engine/index.js';
 
 @Injectable()
 @SignalDetector({ name: 'bill-due-detector', cron: '0 * * * *' }) // every hour
@@ -293,8 +300,15 @@ export class BillDueDetector implements SignalDetector {
   constructor(private readonly signalEngine: SignalEngineFacade, private readonly bills: BillsService) {}
 
   async run(): Promise<void> {
+    const today = new Date().toISOString().slice(0, 10);
     for (const bill of await this.bills.findDueSoon()) {
-      await this.signalEngine.emit({ userId: bill.userId, type: 'bill.due', payload: { ... }, dedupeKey: `bill-due:${bill.id}:${todayIso()}` });
+      await this.signalEngine.emit({
+        userId: bill.userId,
+        type: 'bill.due',
+        payload: { billId: bill.id, dueDate: bill.dueDate, amountCents: bill.amountCents, currency: bill.currency, daysUntilDue: bill.daysUntilDue },
+        // The detector runs every hour: the dedupeKey makes re-emitting the same day's signal a no-op.
+        dedupeKey: `bill-due:${bill.id}:${today}`,
+      });
     }
   }
 }
@@ -303,6 +317,45 @@ export class BillDueDetector implements SignalDetector {
 The engine schedules it and wraps every run in a Postgres transaction-scoped
 advisory lock keyed by `name`, so if you ever run more than one API instance,
 only one of them executes a given detector per tick.
+
+### Manual overrides: `supersedePending` and `recordCorrection`
+
+Manual logging is ground truth. When a user writes something directly in a
+domain (rather than through a suggestion), tell the engine so it can stand down:
+
+```ts
+@Injectable()
+export class HabitsService {
+  constructor(private readonly signalEngine: SignalEngineFacade) {}
+
+  async logHabit(userId: string, habit: Habit, date: string, done: boolean) {
+    const before = await this.findEntry(habit.id, date);
+    const entry = await this.saveEntry(userId, habit.id, date, done);
+
+    // Same key a ConnectionRule uses for this thing in its ProposalDraft.targetKey.
+    const targetKey = `habit:${habit.id}:${date}`;
+
+    // 1. A suggestion still waiting in the inbox for this target is now moot.
+    //    It becomes `superseded` and the audit log records why.
+    await this.signalEngine.supersedePending(userId, targetKey, 'Logged manually', { type: 'habit-entry', id: entry.id });
+
+    // 2. If an *auto-applied* suggestion already changed this target and the user just
+    //    overrode it, record the correction: a `manual_override` activity entry linked to
+    //    that suggestion. (It is a no-op link-wise if nothing auto-applied touched it.)
+    await this.signalEngine.recordCorrection(userId, {
+      targetKey,
+      entityRef: { type: 'habit-entry', id: entry.id },
+      before,
+      after: entry,
+    });
+  }
+}
+```
+
+`supersedePending` only moves suggestions that are *still* pending (a concurrent
+approve wins, and only the rows actually moved are logged). The mirror image
+lives in your `ActionHandler`: check for a manual value first and return
+`{ outcome: 'conflict', reason }` rather than overwriting it.
 
 ### Boot-time checks
 
@@ -373,6 +426,42 @@ here's what was chosen and why:
 - **`GET /inbox/:id`'s "status history" is the suggestion's own
   `ActivityLog` entries**, not a separate history table — the audit log
   already is that history.
+- **A handler's writes are wrapped in a SAVEPOINT.** Anything it wrote through
+  `ctx.tx` is kept only if it returns `applied`; on a throw, `conflict` or
+  `noop` the engine rolls back to the savepoint. Without it, auto mode (which
+  catches the handler's error and commits the surrounding transaction to record
+  the downgrade) would have kept a failing handler's partial writes, and a failed
+  statement inside a handler would have left the whole transaction unusable.
+- **Every transition is compare-and-set, including undo and edit.** Undo claims
+  both the suggestion (`status IN approved/auto_applied`) and the activity entry
+  (`undoneAt IS NULL`) before it touches the domain, so two concurrent undos run
+  `revert` once. Edit only writes while `status = 'pending'`. `supersedePending`,
+  the expiry cron and the pending cap use one atomic `updateManyAndReturn`, so
+  they only log rows they actually moved.
+- **Undo only accepts `suggestion_approved` / `auto_applied` activity entries.**
+  Those are the entries that represent an applied action; letting any activity row
+  that merely mentions an approved suggestion trigger a revert would be wrong.
+- **`signals` is enforced append-only by a database trigger**
+  (`prisma/migrations/*_signals_append_only`). Prisma can't express that, and the
+  spec calls for raw SQL where it can't. Only `processedAt`, `attempts`,
+  `nextAttemptAt`, `lastError` and `updatedAt` may change; deletes (retention,
+  account deletion) are unaffected. Prisma ignores triggers, so `migrate` sees no drift.
+- **Malformed cursors and non-UUID ids are 400, not 500.** They used to reach a
+  `uuid` column / a bad `Date` and surface as an internal error. This also
+  applies to `GET /me/export/:id` and `DELETE /devices/:id` from the auth task.
+- **Fixed the shared `Idempotency-Key` interceptor, which had never stored a
+  key.** It did `void prisma.idempotencyKey.upsert(...)`, but Prisma queries are
+  lazy and only run when awaited, so replays were never recognised (on
+  `POST /me/export` and `POST /devices` too). The write is now awaited before
+  the response, a key reused on a *different* path is refused with 422 instead of
+  silently returning the wrong response, and a storage failure is logged rather
+  than failing an action that already happened. Known limit: two *simultaneous*
+  first requests with the same key both run; the routes it guards are protected
+  by compare-and-set/unique constraints, so one of them answers 409.
+- **The e2e app raises Nest's global throttler; Better Auth's limits stay on.**
+  Request-heavy specs would trip the 60/min default. Better Auth's 5/min sign-up
+  and sign-in limits are real protection and remain enabled, so each e2e spec
+  file signs up at most 5 users.
 - **Fixed a pre-existing connection leak while adding e2e coverage**:
   `lib/auth.ts` (from the earlier auth task) creates its own `PrismaClient`
   outside Nest's DI, since the Better Auth CLI also imports it directly. It was
