@@ -9,7 +9,9 @@ export function IsIanaTimezone(validationOptions?: ValidationOptions): PropertyD
       options: validationOptions,
       validator: {
         validate(value: unknown) {
-          return typeof value === 'string' && Intl.supportedValuesOf('timeZone').includes(value);
+          // supportedValuesOf lists region zones only and leaves out "UTC", which is the default
+          // timezone: without this a user who moved away from it could never go back.
+          return typeof value === 'string' && (value === 'UTC' || Intl.supportedValuesOf('timeZone').includes(value));
         },
         defaultMessage() {
           return 'timezone must be a valid IANA time zone name';

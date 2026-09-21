@@ -14,6 +14,17 @@ describe('UpdateSettingsDto validation', () => {
     expect(errors).toHaveLength(0);
   });
 
+  it('accepts UTC, the default, so a user can always go back to it', async () => {
+    const errors = await validateSettings({ timezone: 'UTC' });
+    expect(errors).toHaveLength(0);
+  });
+
+  it.each(['utc', 'Etc/Nowhere', 'UTC+3', '', 'Europe/'])('rejects "%s" as a timezone', async (timezone) => {
+    const errors = await validateSettings({ timezone });
+    expect(errors).toHaveLength(1);
+    expect(errors[0].property).toBe('timezone');
+  });
+
   it('rejects an invalid timezone', async () => {
     const errors = await validateSettings({ timezone: 'Not/AZone' });
     expect(errors).toHaveLength(1);
