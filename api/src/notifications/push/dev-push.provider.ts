@@ -6,7 +6,7 @@ import type { PushMessage, PushProvider, PushResult } from './push-provider.js';
  * the title, which a real deployment should treat as user data. To send real pushes,
  * implement PushProvider with FCM (Android) and APNs (iOS) - map an
  * "unregistered"/"BadDeviceToken" reply to { outcome: 'invalid_token' }, throw on
- * anything retryable - and bind it to PUSH_PROVIDER in NotificationsModule.
+ * anything retryable - and select it with PUSH_PROVIDER in NotificationsModule.
  */
 @Injectable()
 export class DevPushProvider implements PushProvider {
