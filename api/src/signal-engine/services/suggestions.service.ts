@@ -17,7 +17,7 @@ import {
   resolvePageSize,
 } from '../../common/pagination/cursor-pagination.js';
 import { SignalRegistryService } from '../registry/registry.service.js';
-import type { EntityRef, PrismaTransactionClient } from '../registry/types.js';
+import type { ApplyResult, EntityRef, PrismaTransactionClient } from '../registry/types.js';
 import { ActivityService } from './activity.service.js';
 
 export const DEFAULT_SUGGESTION_EXPIRY_DAYS = 7;
@@ -106,12 +106,38 @@ export class SuggestionsService {
     });
     if (overflow.length === 0) return;
 
-    await tx.suggestion.updateMany({
+    // Only log the rows this statement actually moved: a concurrent approve may have won some.
+    const expired = await tx.suggestion.updateManyAndReturn({
       where: { id: { in: overflow.map((s) => s.id) }, status: 'pending' },
       data: { status: 'expired', resolvedAt: new Date(), resolvedBy: 'system' },
+      select: { id: true },
     });
-    for (const s of overflow) {
+    for (const s of expired) {
       await this.activityService.log({ userId, kind: 'expired', suggestionId: s.id, connectionId }, tx);
+    }
+  }
+
+  /**
+   * Runs a handler inside a SAVEPOINT so whatever it wrote through `tx` is
+   * discarded unless it reports `applied`. Without this, a handler that wrote
+   * something and then threw (or returned conflict/noop) would leave those
+   * writes in the surrounding transaction, and a failed statement inside the
+   * handler would leave that whole transaction in Postgres's aborted state.
+   */
+  private async applyWithSavepoint(
+    tx: PrismaTransactionClient,
+    call: () => Promise<ApplyResult>,
+  ): Promise<ApplyResult> {
+    await tx.$executeRawUnsafe('SAVEPOINT handler_apply');
+    try {
+      const result = await call();
+      await tx.$executeRawUnsafe(
+        result.outcome === 'applied' ? 'RELEASE SAVEPOINT handler_apply' : 'ROLLBACK TO SAVEPOINT handler_apply',
+      );
+      return result;
+    } catch (error) {
+      await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT handler_apply');
+      throw error;
     }
   }
 
@@ -130,11 +156,10 @@ export class SuggestionsService {
       return;
     }
 
-    let result: Awaited<ReturnType<typeof handler.apply>>;
+    let result: ApplyResult;
     try {
-      result = await handler.apply(
-        { userId: suggestion.userId, tx, source: 'auto', suggestionId },
-        suggestion.params,
+      result = await this.applyWithSavepoint(tx, () =>
+        handler.apply({ userId: suggestion.userId, tx, source: 'auto', suggestionId }, suggestion.params),
       );
     } catch (error) {
       result = { outcome: 'noop', reason: error instanceof Error ? error.message : String(error) };
@@ -281,13 +306,14 @@ export class SuggestionsService {
       throw new UnprocessableEntityException({ message: 'Invalid params', details: parsed.error.issues });
     }
 
-    await this.prisma.suggestion.update({
-      where: { id },
+    const updated = await this.prisma.suggestion.updateMany({
+      where: { id, userId, status: 'pending' },
       data: {
         params: parsed.data as Prisma.InputJsonValue,
         originalParams: (suggestion.originalParams ?? (suggestion.params as Prisma.InputJsonValue)) as Prisma.InputJsonValue,
       },
     });
+    if (updated.count === 0) throw new ConflictException('Suggestion is no longer pending');
     await this.activityService.log({
       userId,
       kind: 'suggestion_edited',
@@ -333,9 +359,8 @@ export class SuggestionsService {
         });
         if (claim.count === 0) return { kind: 'cas-lost' } as const;
 
-        const result = await handler.apply(
-          { userId, tx, source: 'suggestion', suggestionId: id },
-          parsedParams.data,
+        const result = await this.applyWithSavepoint(tx, () =>
+          handler.apply({ userId, tx, source: 'suggestion', suggestionId: id }, parsedParams.data),
         );
 
         if (result.outcome === 'conflict' || result.outcome === 'noop') {
@@ -450,17 +475,14 @@ export class SuggestionsService {
 
   /** Marks matching pending suggestions superseded because a manual write took precedence. */
   async supersedePending(userId: string, targetKey: string, reason: string, by?: EntityRef): Promise<void> {
-    const pending = await this.prisma.suggestion.findMany({
+    // One atomic compare-and-set that returns exactly the rows it moved, so the
+    // audit log never records a supersede for a suggestion someone approved first.
+    const superseded = await this.prisma.suggestion.updateManyAndReturn({
       where: { userId, targetKey, status: 'pending' },
+      data: { status: 'superseded', supersededReason: reason, resolvedAt: new Date(), resolvedBy: 'system' },
       select: { id: true, connectionId: true, targetDomain: true },
     });
-    if (pending.length === 0) return;
-
-    await this.prisma.suggestion.updateMany({
-      where: { id: { in: pending.map((s) => s.id) }, status: 'pending' },
-      data: { status: 'superseded', supersededReason: reason, resolvedAt: new Date(), resolvedBy: 'system' },
-    });
-    for (const s of pending) {
+    for (const s of superseded) {
       await this.activityService.log({
         userId,
         kind: 'superseded',
@@ -494,17 +516,12 @@ export class SuggestionsService {
   }
 
   async expirePending(): Promise<number> {
-    const stale = await this.prisma.suggestion.findMany({
+    const expired = await this.prisma.suggestion.updateManyAndReturn({
       where: { status: 'pending', expiresAt: { lt: new Date() } },
+      data: { status: 'expired', resolvedAt: new Date(), resolvedBy: 'system' },
       select: { id: true, userId: true, connectionId: true, targetDomain: true },
     });
-    if (stale.length === 0) return 0;
-
-    await this.prisma.suggestion.updateMany({
-      where: { id: { in: stale.map((s) => s.id) }, status: 'pending' },
-      data: { status: 'expired', resolvedAt: new Date(), resolvedBy: 'system' },
-    });
-    for (const s of stale) {
+    for (const s of expired) {
       await this.activityService.log({
         userId: s.userId,
         kind: 'expired',
@@ -513,13 +530,15 @@ export class SuggestionsService {
         targetDomain: s.targetDomain,
       });
     }
-    return stale.length;
+    return expired.length;
   }
 
   async undoActivity(userId: string, activityId: string) {
     const activity = await this.prisma.activityLog.findFirst({ where: { id: activityId, userId } });
     if (!activity) throw new NotFoundException('Activity entry not found');
-    if (!activity.suggestionId) throw new UnprocessableEntityException('This activity entry cannot be undone');
+    if (!activity.suggestionId || (activity.kind !== 'suggestion_approved' && activity.kind !== 'auto_applied')) {
+      throw new UnprocessableEntityException('Only an approval or auto-apply entry can be undone');
+    }
     if (activity.undoneAt) throw new ConflictException('This action was already undone');
 
     const suggestion = await this.prisma.suggestion.findFirst({ where: { id: activity.suggestionId, userId } });
@@ -541,16 +560,30 @@ export class SuggestionsService {
 
     try {
       await this.prisma.$transaction(async (tx) => {
+        // Compare-and-set both the suggestion and the activity entry *before*
+        // touching the domain: of two concurrent undo calls exactly one gets past
+        // these claims, so handler.revert can never run twice for the same action.
+        const claimedSuggestion = await tx.suggestion.updateMany({
+          where: { id: suggestion.id, userId, status: { in: ['approved', 'auto_applied'] } },
+          data: { status: 'reverted' },
+        });
+        const claimedActivity = await tx.activityLog.updateMany({
+          where: { id: activityId, userId, undoneAt: null },
+          data: { undoneAt: new Date() },
+        });
+        if (claimedSuggestion.count === 0 || claimedActivity.count === 0) {
+          throw new ConflictExceptionMarker('This action was already undone');
+        }
+
         const result = await handler.revert!(
           { userId, tx, source: 'suggestion', suggestionId: suggestion.id },
           suggestion.revertData,
         );
         if (result.outcome === 'conflict') {
+          // Rolls the claims above back too, so a conflicted undo leaves everything untouched.
           throw new ConflictExceptionMarker(result.reason);
         }
 
-        await tx.suggestion.update({ where: { id: suggestion.id }, data: { status: 'reverted' } });
-        await tx.activityLog.update({ where: { id: activityId }, data: { undoneAt: new Date() } });
         await this.activityService.log(
           {
             userId,
