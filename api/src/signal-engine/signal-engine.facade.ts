@@ -32,7 +32,10 @@ export class SignalEngineFacade {
   async emit(input: EmitInput, tx?: PrismaTransactionClient) {
     const signal = await this.signalsService.persist(input, tx);
     if (!tx) {
-      this.eventEmitter.emit(SIGNAL_EMITTED_EVENT, { signalId: signal.id });
+      // emitAsync (not emit) so the fast path actually runs before this resolves,
+      // instead of being fire-and-forget racing whatever the caller does next.
+      // A failure here still falls back to the sweeper cron - see FastPathListener.
+      await this.eventEmitter.emitAsync(SIGNAL_EMITTED_EVENT, { signalId: signal.id });
     }
     return signal;
   }

@@ -115,14 +115,30 @@ export const SIGNAL_CATALOG = {
 
 export type SignalType = keyof typeof SIGNAL_CATALOG;
 
+/**
+ * Extension point: unlike the connection catalog (deliberately fixed, see
+ * catalog/connections.ts), the set of signal types is expected to grow as
+ * domain modules are built. A future domain module calls this once, from its
+ * own module's code, to add its signal types without editing this file. The
+ * sandbox test fixtures (test/sandbox/) use the exact same mechanism.
+ */
+const dynamicSignalCatalog = new Map<string, SignalCatalogEntry>();
+
+export function registerSignalType(type: string, entry: SignalCatalogEntry): void {
+  if (Object.hasOwn(SIGNAL_CATALOG, type)) {
+    throw new Error(`Signal type "${type}" is already defined in the built-in catalog`);
+  }
+  dynamicSignalCatalog.set(type, entry);
+}
+
 export function isKnownSignalType(type: string): type is SignalType {
-  return Object.hasOwn(SIGNAL_CATALOG, type);
+  return Object.hasOwn(SIGNAL_CATALOG, type) || dynamicSignalCatalog.has(type);
 }
 
 export function getSignalCatalogEntry(type: SignalType): SignalCatalogEntry {
-  return SIGNAL_CATALOG[type];
+  return (SIGNAL_CATALOG as Record<string, SignalCatalogEntry>)[type] ?? dynamicSignalCatalog.get(type)!;
 }
 
 export function allSignalTypes(): SignalType[] {
-  return Object.keys(SIGNAL_CATALOG) as SignalType[];
+  return [...Object.keys(SIGNAL_CATALOG), ...dynamicSignalCatalog.keys()] as SignalType[];
 }

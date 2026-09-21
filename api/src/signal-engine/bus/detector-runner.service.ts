@@ -35,6 +35,13 @@ export class DetectorRunnerService implements OnApplicationBootstrap {
     }
   }
 
+  /** Test hook: triggers one detector's lock-guarded run outside of its cron schedule. */
+  async runDetectorForTesting(name: string): Promise<void> {
+    const detector = this.registry.getDetectors().find((d) => d.options.name === name);
+    if (!detector) throw new Error(`No detector registered with name "${name}"`);
+    await this.runWithLock(name, detector.instance);
+  }
+
   private async runWithLock(name: string, instance: SignalDetector): Promise<void> {
     try {
       await this.prisma.$transaction(async (tx) => {
