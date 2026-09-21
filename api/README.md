@@ -98,7 +98,12 @@ read back from the dev mail provider, not an inbox), sign-in, bearer-token acces
 settings/privacy round-trips, device and export ownership checks, full account
 deletion, and the full signal engine lifecycle (suggest/auto modes, approvals,
 undo, conflicts, dedupe, retries, retention, and cross-user isolation) using the
-test-only sandbox fixtures under `test/sandbox/`. Better Auth's sign-up/sign-in
+test-only sandbox fixtures under `test/sandbox/`, plus Today (with failing, slow
+and malformed contributors), review generation (idempotency, isolation, locking,
+timezones and week starts), notifications (dedupe, unread counts, preferences,
+quiet hours, push retries and invalid-token cleanup, inbox-suggestion batching),
+export inclusion, account-deletion cascade and retention, in
+`test/e2e/today-reviews-notifications/`. Better Auth's sign-up/sign-in
 rate limits stay enabled in e2e (5 per minute), so keep each spec file to at most
 5 `signUpAndVerify` calls.
 
@@ -474,6 +479,263 @@ here's what was chosen and why:
   app, but it means `process.env` overrides set inside a test don't reach an
   app created later in the same Vitest worker. This is a testing-ergonomics
   limitation of that pattern, not a product bug.
+
+## Today, reviews and notifications
+
+Three modules that sit on top of the domains (tasks, habits, fitness, finances,
+meals, calendar) without knowing any of them. `GET /today` and the weekly/monthly
+reviews are assembled from **contributors** that each domain declares; a domain
+tells the user something through **`NotificationsFacade`**. The domain modules
+don't exist yet, so everything here is exercised by test-only fakes under
+`test/sandbox/`, never by code in `src/`.
+
+| Route | What it does |
+| --- | --- |
+| `GET /api/v1/today?date=YYYY-MM-DD` | One section per registered domain, plus the inbox count. `date` defaults to today on the user's own calendar |
+| `GET /api/v1/reviews?type=weekly\|monthly` | The user's reviews, newest period first, cursor-paginated |
+| `GET /api/v1/reviews/:id` | One review |
+| `GET /api/v1/notifications?unreadOnly=` | In-app notifications, newest first, cursor-paginated |
+| `GET /api/v1/notifications/unread-count` | The badge number |
+| `POST /api/v1/notifications/:id/read`, `POST /api/v1/notifications/read-all` | Mark read (accept `Idempotency-Key`) |
+| `GET`/`PATCH /api/v1/notification-preferences` | Per-category in-app/push switches and quiet hours |
+
+Everything is owner-scoped, validated, documented in OpenAPI (`/docs`) and answers
+with the standard error shape.
+
+### Registering a `TodayContributor`
+
+Declare a provider anywhere reachable from `AppModule`. Nothing in the Today
+module changes; contributors are found at boot (the same mechanism as the signal
+engine's rules and handlers).
+
+```ts
+import { Injectable } from '@nestjs/common';
+import { TodayContributor, type TodayContext, type TodayContribution } from '../today/index.js';
+
+@Injectable()
+@TodayContributor('tasks') // one of the SignalDomain values; at most one per domain
+export class TasksTodayContributor implements TodayContributor {
+  constructor(private readonly tasks: TasksService) {}
+
+  async collect({ userId, date, timezone }: TodayContext): Promise<TodayContribution> {
+    // `date` is the day being shown ("YYYY-MM-DD"), already resolved in the user's timezone.
+    const due = await this.tasks.dueOn(userId, date, timezone);
+    return {
+      summary: { open: due.length },                       // a small rollup, shape is yours
+      items: due.map((t) => ({ id: t.id, title: t.title, dueAt: t.dueAt })), // id + title required, extras kept
+    };
+  }
+}
+```
+
+Then list it in your module's `providers`. What comes back:
+
+```json
+{
+  "date": "2026-09-21",
+  "timezone": "Africa/Nairobi",
+  "sections": [
+    { "domain": "tasks", "status": "ok", "summary": { "open": 2 }, "items": [{ "id": "…", "title": "…" }] },
+    { "domain": "habits", "status": "error" },
+    { "domain": "finances", "status": "timeout" }
+  ],
+  "inbox": { "pending": 2 }
+}
+```
+
+Contributors run in parallel, each with its own budget (`TODAY_CONTRIBUTOR_TIMEOUT_MS`).
+One that throws, answers in the wrong shape, or is too slow only turns *its own*
+section into `error`/`timeout`; the endpoint always answers 200. A failure is logged
+with the domain and user id only, never with what the contributor returned or threw.
+
+### Registering a `ReviewContributor`
+
+Same idea, once per domain:
+
+```ts
+import { Injectable } from '@nestjs/common';
+import { ReviewContributor, type ReviewContext, type ReviewContribution } from '../reviews/index.js';
+
+@Injectable()
+@ReviewContributor('tasks')
+export class TasksReviewContributor implements ReviewContributor {
+  constructor(private readonly tasks: TasksService) {}
+
+  async collect({ userId, periodStart, periodEnd }: ReviewContext): Promise<ReviewContribution> {
+    // Query `>= periodStart AND < periodEnd`: instants cut at the user's local midnights.
+    // `startDate`/`endDate` are the same period as local dates ("YYYY-MM-DD", both inclusive).
+    const completed = await this.tasks.countCompleted(userId, periodStart, periodEnd);
+    return {
+      metrics: { completed },                                   // numbers, strings, booleans, null
+      highlights: completed ? [`Completed ${completed} tasks`] : [],
+      // hasActivity: true | false   // optional; see below
+    };
+  }
+}
+```
+
+A review is `sections[]`: one per registered domain (same `ok`/`error`/`timeout` states as
+Today, budget `REVIEW_CONTRIBUTOR_TIMEOUT_MS`), then a built-in **`cross_domain`** section
+from the signal engine's audit log: suggestions created / approved / dismissed /
+auto-applied / reverted, and manual overrides, for the period.
+
+**When are reviews made?** A cron runs hourly (at :05) and only looks at users whose local
+clock is in the 02:00 hour, so each user is handled once a day wherever they live. For each
+it generates the previous complete week (respecting the user's `weekStartsOn`) and the
+previous complete month, in the user's timezone, if that review doesn't exist yet. A user
+with **no activity** in the period gets no review: a domain counts as active if it says
+`hasActivity: true`, or (when it doesn't say) has a highlight or a non-zero numeric metric;
+the engine counts as active if it logged any suggestion created, approved, dismissed,
+auto-applied or reverted, or a manual override, in the period. A section that errored or timed
+out never counts. When a review is created the user gets a `review_ready` notification.
+
+Generation is idempotent (unique on user, type, period start), batched
+(`REVIEW_GENERATION_BATCH_SIZE`), and safe across API instances: the whole run holds a
+Postgres advisory lock, so a second instance's run is a no-op.
+
+### Sending notifications with `NotificationsFacade`
+
+Import `NotificationsModule` and inject the facade. It is the only entry point.
+
+```ts
+constructor(private readonly notifications: NotificationsFacade) {}
+
+await this.notifications.notify({
+  userId,
+  category: 'bill',            // inbox_suggestion | review_ready | bill | reminder | system
+  domain: 'finances',          // optional
+  title: 'Rent is due Friday',
+  body: '$1,200 to Acme Properties',
+  data: { billId },            // optional deep-link payload: stored as JSON, stringified in the push
+  dedupeKey: `bill:${billId}:3d`, // optional: a repeat for the same user is neither stored nor pushed again
+});
+// -> { notification: { id } | null, created: boolean, pushQueued: boolean }
+```
+
+It stores the in-app notification first, then queues a push to the user's devices through
+the `JobRunner` (retried with backoff on transient failures). The user's preferences decide
+what happens: in-app off for the category → nothing is stored; push off → nothing is pushed.
+**Quiet hours suppress the push only, never the in-app notification.** A device whose token the
+provider reports as permanently invalid is deleted.
+
+You don't call it for inbox suggestions: when the signal engine leaves a suggestion waiting
+for the user, an `inbox_suggestion` notification is created automatically (see Decisions for
+how bursts are batched and which suggestions notify).
+
+### Sending real pushes (still to configure)
+
+The app ships with a `dev` push provider that only logs. **No push credentials are configured
+and none are needed to run or test it.** To deliver real pushes:
+
+1. Implement `PushProvider` (`src/notifications/push/push-provider.ts`) with FCM (Android) and
+   APNs (iOS), or FCM for both. `send()` resolves `{ outcome: 'sent' }`, resolves
+   `{ outcome: 'invalid_token' }` for a permanently dead token (FCM `UNREGISTERED`, APNs
+   `BadDeviceToken`/`Unregistered`), and **throws** for anything retryable.
+2. Give it its credentials via new env vars added to `src/config/env.schema.ts` and
+   `.env.example`: for FCM a service account (project id + client email + private key), for APNs
+   a `.p8` auth key with its key id, team id and the app's bundle id.
+3. Add the provider's name to the `PUSH_PROVIDER` enum in the same schema and a `case` for it in
+   the factory in `src/notifications/notifications.module.ts`.
+
+Nothing else changes: preferences, quiet hours, batching, retries and invalid-token cleanup
+already sit in front of the provider.
+
+### Environment variables
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `TODAY_CONTRIBUTOR_TIMEOUT_MS` | `1500` | How long each domain gets to answer `GET /today` before its section is `timeout` |
+| `REVIEW_CONTRIBUTOR_TIMEOUT_MS` | `10000` | The same, per domain, when building a review |
+| `REVIEW_GENERATION_BATCH_SIZE` | `100` | Users processed per batch by the review cron |
+| `NOTIFICATION_RETENTION_DAYS` | `90` | Read notifications older than this (by read time) are pruned daily; unread ones are kept |
+| `INBOX_PUSH_MIN_INTERVAL_SECONDS` | `60` | At most one inbox-suggestion push per user per this many seconds (`0` turns the limit off) |
+| `PUSH_PROVIDER` | `dev` | Which `PushProvider` to use. Only `dev` (logs) exists |
+| `PUSH_MAX_ATTEMPTS` | `3` | Attempts per device for a push that keeps failing transiently |
+| `PUSH_RETRY_BASE_DELAY_MS` | `1000` | Backoff before the first retry; doubles each time |
+
+### Decisions
+
+Where the brief was ambiguous, and things worth knowing:
+
+- **Sections follow the `SignalDomain` order, and only registered domains appear.** A domain
+  with no contributor is simply absent from `sections` (not an `unavailable` entry), so the
+  response grows as domains are added. Contributor domains must be a real `SignalDomain`;
+  a typo, a missing `collect()` or a duplicate throws at boot.
+- **A malformed contributor answer is an `error`, not a crash.** Contributions are
+  validated (zod) before they reach the client or the database.
+- **A timed-out contributor cannot be cancelled**, so it is left to finish in the
+  background and its result is discarded (with a handler attached so a late failure is
+  not an unhandled rejection).
+- **The default date and every review period are computed on the user's calendar**, from
+  `UserSettings.timezone` (`UTC` if they have no settings row) using `Intl`, no date
+  library. `date` must be a real calendar date: `2026-02-30`, `2026-9-1` and `today` are 400.
+- **Reviews list newest *period* first**, not newest generated, breaking ties (a week and
+  a month starting the same day) on id, so pages never skip or repeat. `type` is an optional
+  filter. A review exposes its period as inclusive local dates plus the `timezone` it was
+  cut in; changing timezone later doesn't rewrite old reviews.
+- **A user is only looked at in their 02:00 hour, and a missed period is retried for three
+  days.** After that the cron leaves it alone, so a user who was down for longer isn't
+  re-collected every hour for the rest of the month. `ReviewGenerationService.generateForUser`
+  ignores both limits (it is what you'd call to backfill) but is not exposed over HTTP.
+- **"Activity" for the cross-domain section is the audit log.** Suggestions that an
+  `auto` connection applied straight away count as auto-applied, not as created, since they
+  never waited for the user. Even a period with only "created" counts as activity.
+- **The review lock is one transaction-scoped advisory lock for the whole run**
+  (`pg_try_advisory_xact_lock`, up to 15 minutes), the same primitive as the signal
+  detectors, now shared as `AdvisoryLockService`. It also fixed the detector lock:
+  Prisma's interactive transactions time out after 5s by default, which silently released
+  the lock while a detector was still running. Two generators racing on one user (the cron
+  and a backfill) are still safe: the unique constraint makes one lose cleanly and the
+  notification dedupe key means the user hears about it once.
+- **A failed notification never undoes a review**, and a failing subscriber never undoes a
+  processed signal. The engine and notifications are decoupled by an event the engine emits
+  after its transaction commits (`SUGGESTIONS_CREATED_EVENT`); notifications depend on the
+  engine, not the other way round.
+- **Dedupe lives in the stored row.** If the user has switched in-app off for a category
+  there is no row to dedupe against, so a repeated `notify` call with the same key would push
+  again. `dedupeKey` is unique per user, not global.
+- **Quiet hours are one window per user, not per category**, read in their timezone, `start`
+  inclusive and `end` exclusive; `start > end` wraps past midnight (`22:00`–`07:00`). Both
+  times or neither; `start === end` is a 400 rather than a guess between "all day" and
+  "never". **A push suppressed by quiet hours is dropped, not deferred** until the window
+  ends: the in-app notification is there when they look.
+- **Only `inbox_suggestion` pushes are rate-limited** (one per user per
+  `INBOX_PUSH_MIN_INTERVAL_SECONDS`), because it is the category that arrives in bursts. Every
+  suggestion still gets its own in-app notification, and one event with several suggestions
+  becomes one summarising push ("3 new suggestions"). The limiter is a database row updated
+  atomically, so it holds across API instances. A push held back by quiet hours does **not**
+  use up the slot; one held back by the limiter is dropped, not queued. Other categories are
+  not throttled: their callers decide the cadence and pass a `dedupeKey`.
+- **Which suggestions notify:** those waiting for the user. An `auto` connection that applied
+  silently doesn't, a superseded one doesn't, one that fell back to "ask the user" because the
+  handler failed does.
+- **Push delivery is in-process.** It goes through `JobRunner`, which today runs the job in
+  the same process, so a retry queued at the moment the process dies is lost (the in-app
+  notification is not). Swapping in a real queue behind `JobRunner` fixes this here and for
+  data export.
+- **A dead token is removed only if it is still the same token** (`id` and `pushToken`
+  both match), so a device row re-registered to someone else in the meantime is left alone.
+  Giving up after `PUSH_MAX_ATTEMPTS` never deletes a device.
+- **Push data is a flat string map** (an FCM/APNs constraint): values that aren't strings
+  are JSON-encoded. The dev provider logs the notification title, which a real deployment
+  should treat as user data.
+- **Retention prunes by `readAt`, and only read notifications.** An unread one, however old,
+  is still something the user hasn't seen. Runs daily at 03:30.
+- **Marking read is idempotent** (an already-read notification keeps its first `readAt`), and
+  another user's notification answers 404, exactly as a missing one does. The POSTs return
+  200 rather than 201 because they act on existing resources, like the inbox routes.
+- **Fixed two defects in earlier work while testing this.** `startOfLocalDay` returned an
+  instant an hour *before* the day began where the clocks skip local midnight (Cuba, Chile),
+  which would have put an hour of the previous day into a review. And `PATCH /me/settings`
+  rejected `"UTC"` (the default) because `Intl.supportedValuesOf('timeZone')` omits it, so a
+  user who had changed timezone could never change back.
+- **Request DTOs of the new routes carry explicit OpenAPI decorators** rather than relying
+  on the Swagger CLI plugin alone, so the documentation is the same under `nest build` and
+  under Vitest, where it can be asserted on.
+- **The e2e specs use dates in 2035–2036 and stop the real cron jobs.** Reviews are driven
+  through `ReviewGenerationService` with a given `now`, so the hourly schedule can't fire in
+  the middle of a test, and real activity left in the shared test database can never fall inside
+  the periods being asserted on.
 
 ## Local Postgres without Docker
 
