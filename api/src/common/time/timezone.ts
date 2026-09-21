@@ -80,6 +80,10 @@ export function startOfLocalDay(date: string, timezone: string): Date {
   // guess and the answer), correct once using the offset that actually applies there.
   const secondOffset = timezoneOffsetMs(new Date(instant), timezone);
   if (secondOffset !== firstOffset) instant = utcGuess - secondOffset;
+  // Where the clocks skip over local midnight (00:00 -> 01:00, as in Cuba or Chile) that
+  // correction lands an hour before the day begins. The day really starts at the jump itself,
+  // which is what the first reading gives.
+  if (localDateInTimezone(new Date(instant), timezone) < date) instant = utcGuess - firstOffset;
   return new Date(instant);
 }
 
