@@ -1,4 +1,14 @@
-import { BadRequestException, Body, Controller, Delete, Param, Post, Query, UseInterceptors } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+  UseInterceptors,
+} from '@nestjs/common';
 import { CurrentUser, type CurrentUserType } from '../../common/decorators/current-user.decorator.js';
 import { IdempotencyInterceptor } from '../../common/idempotency/idempotency.interceptor.js';
 import { DevicesService } from './devices.service.js';
@@ -15,7 +25,7 @@ export class DevicesController {
   }
 
   @Delete(':id')
-  remove(@CurrentUser() user: CurrentUserType, @Param('id') id: string) {
+  remove(@CurrentUser() user: CurrentUserType, @Param('id', ParseUUIDPipe) id: string) {
     return this.devicesService.removeOwned(user.id, id);
   }
 

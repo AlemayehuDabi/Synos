@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Post, Res, StreamableFile, UseInterceptors } from '@nestjs/common';
+import { Controller, Get, Param, ParseUUIDPipe, Post, Res, StreamableFile, UseInterceptors } from '@nestjs/common';
 import type { Response } from 'express';
 import { CurrentUser, type CurrentUserType } from '../../common/decorators/current-user.decorator.js';
 import { IdempotencyInterceptor } from '../../common/idempotency/idempotency.interceptor.js';
@@ -17,7 +17,7 @@ export class DataExportController {
   @Get(':id')
   async getJob(
     @CurrentUser() user: CurrentUserType,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Res({ passthrough: true }) res: Response,
   ) {
     const job = await this.dataExportService.getJobForOwner(user.id, id);

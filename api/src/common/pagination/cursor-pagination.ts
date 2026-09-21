@@ -1,3 +1,5 @@
+import { BadRequestException } from '@nestjs/common';
+
 /**
  * Cursor-based pagination convention shared across modules. Nothing in this task
  * paginates yet, but future list endpoints (tasks, habits, ...) should use this
@@ -44,16 +46,18 @@ export interface DecodedCompoundCursor {
   id: string;
 }
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export function decodeCompoundCursor(cursor: string): DecodedCompoundCursor {
   const raw = decodeCursor(cursor);
   const separatorIndex = raw.lastIndexOf('|');
   if (separatorIndex === -1) {
-    throw new Error('Malformed cursor');
+    throw new BadRequestException('Malformed cursor');
   }
   const sortValue = new Date(raw.slice(0, separatorIndex));
   const id = raw.slice(separatorIndex + 1);
-  if (Number.isNaN(sortValue.getTime()) || !id) {
-    throw new Error('Malformed cursor');
+  if (Number.isNaN(sortValue.getTime()) || !UUID_PATTERN.test(id)) {
+    throw new BadRequestException('Malformed cursor');
   }
   return { sortValue, id };
 }
