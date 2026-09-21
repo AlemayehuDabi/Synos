@@ -178,7 +178,7 @@ describe('SuggestionsService transitions', () => {
     it('marks the suggestion auto_applied with revertData and logs auto_applied', async () => {
       setup({ outcome: 'applied', entityRef: { type: 't', id: 'x' }, before: null, after: { ok: 1 }, revertData: { r: 1 } });
 
-      await service.applyAuto(tx as never, 's1');
+      await expect(service.applyAuto(tx as never, 's1')).resolves.toBe('applied');
 
       expect(tx.suggestion.update).toHaveBeenCalledWith({
         where: { id: 's1' },
@@ -193,7 +193,7 @@ describe('SuggestionsService transitions', () => {
     it('supersedes with the reason on a conflict', async () => {
       setup({ outcome: 'conflict', reason: 'manual value present' });
 
-      await service.applyAuto(tx as never, 's1');
+      await expect(service.applyAuto(tx as never, 's1')).resolves.toBe('superseded');
 
       expect(tx.suggestion.update).toHaveBeenCalledWith({
         where: { id: 's1' },
@@ -208,7 +208,7 @@ describe('SuggestionsService transitions', () => {
     ])('downgrades to a pending suggestion with a failureNote on %s, and never throws', async (_name, result, note) => {
       setup(result);
 
-      await expect(service.applyAuto(tx as never, 's1')).resolves.toBeUndefined();
+      await expect(service.applyAuto(tx as never, 's1')).resolves.toBe('pending');
 
       expect(tx.suggestion.update).toHaveBeenCalledWith({ where: { id: 's1' }, data: { failureNote: note } });
       expect(activity.log).toHaveBeenCalledWith(expect.objectContaining({ kind: 'suggestion_created' }), tx);

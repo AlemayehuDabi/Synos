@@ -15,3 +15,4 @@ export {
   type RuleContext,
   type SignalDetectorOptions,
 } from './registry/index.js';
+export { SUGGESTIONS_CREATED_EVENT, type SuggestionsCreatedEvent } from './events.js';

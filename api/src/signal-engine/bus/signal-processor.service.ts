@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../lib/prisma.js';
+import { SUGGESTIONS_CREATED_EVENT, type SuggestionsCreatedEvent } from '../events.js';
 import { getConnectionsForSignalType } from '../catalog/connections.js';
 import type { SignalType } from '../catalog/signals.js';
 import { SignalRegistryService } from '../registry/registry.service.js';
@@ -27,12 +29,15 @@ export class SignalProcessorService {
     private readonly registry: SignalRegistryService,
     private readonly connectionsService: ConnectionsService,
     private readonly suggestionsService: SuggestionsService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async processSignal(signalId: string): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
+    const outcome = await this.prisma.$transaction(async (tx) => {
       const signal = await tx.signal.findUnique({ where: { id: signalId } });
-      if (!signal || signal.processedAt) return;
+      if (!signal || signal.processedAt) return null;
+
+      const awaitingUser: SuggestionsCreatedEvent['suggestions'] = [];
 
       const connections = getConnectionsForSignalType(signal.type as SignalType);
       const view: RuleSignalView = {
@@ -85,15 +90,36 @@ export class SignalProcessorService {
 
           if (!created) continue; // dedupe: another signal already produced this exact suggestion
 
+          let waitingForUser = true;
           if (mode === 'auto') {
-            await this.suggestionsService.applyAuto(tx, suggestion.id);
+            // an auto-applied (or superseded) suggestion is not waiting for anyone
+            waitingForUser = (await this.suggestionsService.applyAuto(tx, suggestion.id)) === 'pending';
           } else {
             await this.suggestionsService.logCreated(tx, suggestion);
+          }
+          if (waitingForUser) {
+            awaitingUser.push({
+              id: suggestion.id,
+              connectionId: suggestion.connectionId,
+              targetDomain: suggestion.targetDomain,
+              title: suggestion.title,
+            });
           }
         }
       }
 
       await tx.signal.update({ where: { id: signalId }, data: { processedAt: new Date() } });
+      return { userId: signal.userId, suggestions: awaitingUser };
     });
+
+    // Only after the commit: a listener must never see a suggestion that could still roll back.
+    if (outcome && outcome.suggestions.length > 0) {
+      try {
+        await this.eventEmitter.emitAsync(SUGGESTIONS_CREATED_EVENT, outcome satisfies SuggestionsCreatedEvent);
+      } catch {
+        // The signal is already processed; a failing subscriber must not make it look unprocessed.
+        this.logger.warn(`A subscriber to ${SUGGESTIONS_CREATED_EVENT} failed for signal ${signalId}`);
+      }
+    }
   }
 }

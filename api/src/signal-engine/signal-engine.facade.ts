@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { type EmitInput, SignalsService } from './services/signals.service.js';
+import { ActivityService } from './services/activity.service.js';
 import { SuggestionsService } from './services/suggestions.service.js';
+import type { ActivityKind } from '../generated/prisma/enums.js';
 import type { EntityRef, PrismaTransactionClient } from './registry/types.js';
 
 export const SIGNAL_EMITTED_EVENT = 'signal-engine.signal-emitted';
@@ -16,6 +18,7 @@ export class SignalEngineFacade {
   constructor(
     private readonly signalsService: SignalsService,
     private readonly suggestionsService: SuggestionsService,
+    private readonly activityService: ActivityService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -49,5 +52,15 @@ export class SignalEngineFacade {
     input: { targetKey: string; entityRef: EntityRef; before?: unknown; after?: unknown },
   ): Promise<void> {
     return this.suggestionsService.recordCorrection(userId, input);
+  }
+
+  /** What the Today screen and the inbox badge show: how many suggestions are waiting on the user. */
+  async inboxSummary(userId: string): Promise<{ pending: number }> {
+    return { pending: await this.suggestionsService.countPending(userId) };
+  }
+
+  /** Audit-log entry counts by kind in [from, to), for periodic reviews. */
+  async activityCounts(userId: string, from: Date, to: Date): Promise<Partial<Record<ActivityKind, number>>> {
+    return this.activityService.countByKind(userId, from, to);
   }
 }

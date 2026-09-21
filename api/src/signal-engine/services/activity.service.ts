@@ -52,6 +52,16 @@ export class ActivityService {
     });
   }
 
+  /** How many entries of each kind the user has in [from, to). Kinds with no entries are omitted. */
+  async countByKind(userId: string, from: Date, to: Date): Promise<Partial<Record<ActivityKind, number>>> {
+    const rows = await this.prisma.activityLog.groupBy({
+      by: ['kind'],
+      where: { userId, createdAt: { gte: from, lt: to } },
+      _count: { _all: true },
+    });
+    return Object.fromEntries(rows.map((row) => [row.kind, row._count._all]));
+  }
+
   async list(
     userId: string,
     filters: ListActivityFilters,

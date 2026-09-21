@@ -42,6 +42,9 @@ export interface ListInboxFilters {
   connectionId?: string;
 }
 
+/** Where an auto-mode suggestion ended up: `pending` means it downgraded to waiting for the user. */
+export type AutoApplyOutcome = 'applied' | 'superseded' | 'pending';
+
 type ApproveOutcome =
   | { kind: 'applied' }
   | { kind: 'conflict'; reason: string }
@@ -147,13 +150,13 @@ export class SuggestionsService {
    * or a `noop` result both downgrade to a plain pending suggestion with a
    * failureNote, matching suggest-mode - only unexpected infra errors escape.
    */
-  async applyAuto(tx: PrismaTransactionClient, suggestionId: string): Promise<void> {
+  async applyAuto(tx: PrismaTransactionClient, suggestionId: string): Promise<AutoApplyOutcome> {
     const suggestion = await tx.suggestion.findUniqueOrThrow({ where: { id: suggestionId } });
     const handler = this.registry.getHandler(suggestion.actionType);
     if (!handler) {
       // Should not happen: the caller already checked a handler exists before creating
       // the suggestion. Leave it pending rather than lose the suggestion.
-      return;
+      return 'pending';
     }
 
     let result: ApplyResult;
@@ -189,7 +192,7 @@ export class SuggestionsService {
         },
         tx,
       );
-      return;
+      return 'applied';
     }
 
     if (result.outcome === 'conflict') {
@@ -208,7 +211,7 @@ export class SuggestionsService {
         },
         tx,
       );
-      return;
+      return 'superseded';
     }
 
     // Graceful downgrade to suggest-first: stays pending, note why auto-apply didn't happen.
@@ -224,6 +227,7 @@ export class SuggestionsService {
       },
       tx,
     );
+    return 'pending';
   }
 
   async logCreated(tx: PrismaTransactionClient, suggestion: Prisma.SuggestionGetPayload<object>): Promise<void> {
