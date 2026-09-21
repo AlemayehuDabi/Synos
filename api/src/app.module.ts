@@ -12,6 +12,7 @@ import { MeModule } from './modules/me/me.module.js';
 import { DevicesModule } from './modules/devices/devices.module.js';
 import { SignalEngineModule } from './signal-engine/signal-engine.module.js';
 import { NotificationsModule } from './notifications/notifications.module.js';
+import { TodayModule } from './today/today.module.js';
 import { JobsModule } from './common/jobs/jobs.module.js';
 import { LocksModule } from './common/locks/locks.module.js';
 import { HealthController } from './common/health/health.controller.js';
@@ -41,6 +42,7 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
     DevicesModule,
     SignalEngineModule,
     NotificationsModule,
+    TodayModule,
   ],
   controllers: [HealthController],
   providers: [
