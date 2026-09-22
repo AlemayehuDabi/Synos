@@ -40,6 +40,10 @@ export const envSchema = z.object({
   PUSH_PROVIDER: z.enum(['dev']).default('dev'),
   PUSH_MAX_ATTEMPTS: z.coerce.number().int().positive().max(10).default(3),
   PUSH_RETRY_BASE_DELAY_MS: z.coerce.number().int().nonnegative().default(1000),
+
+  CALENDAR_CONTRIBUTOR_TIMEOUT_MS: z.coerce.number().int().positive().default(1500),
+  CALENDAR_MAX_OCCURRENCES_PER_QUERY: z.coerce.number().int().positive().max(50_000).default(2000),
+  CALENDAR_TOMBSTONE_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -15,10 +15,14 @@ export class SandboxTasksToday implements TodayContributor {
   }
 }
 
-/** Records the context it was handed, so specs can check the date and timezone. */
+/**
+ * Records the context it was handed, so specs can check the date and timezone. Uses
+ * 'fitness', the one SignalDomain none of the other fixtures here or the real Calendar
+ * module's own @TodayContributor('calendar') claims.
+ */
 @Injectable()
-@TodayContributor('calendar')
-export class SandboxCalendarToday implements TodayContributor {
+@TodayContributor('fitness')
+export class SandboxFitnessToday implements TodayContributor {
   async collect(context: TodayContext): Promise<TodayContribution> {
     sandboxState.todayContexts.push(context);
     return { summary: { events: 0 }, items: [] };
@@ -55,6 +59,6 @@ export class SandboxMealsToday implements TodayContributor {
 
 /** Five fake domains: two healthy, one throwing, one too slow, one malformed. */
 @Module({
-  providers: [SandboxTasksToday, SandboxCalendarToday, SandboxHabitsToday, SandboxFinancesToday, SandboxMealsToday],
+  providers: [SandboxTasksToday, SandboxFitnessToday, SandboxHabitsToday, SandboxFinancesToday, SandboxMealsToday],
 })
 export class SandboxTodayModule {}

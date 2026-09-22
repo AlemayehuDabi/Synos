@@ -14,6 +14,7 @@ import { SignalEngineModule } from './signal-engine/signal-engine.module.js';
 import { NotificationsModule } from './notifications/notifications.module.js';
 import { TodayModule } from './today/today.module.js';
 import { ReviewsModule } from './reviews/reviews.module.js';
+import { CalendarModule } from './calendar/calendar.module.js';
 import { JobsModule } from './common/jobs/jobs.module.js';
 import { LocksModule } from './common/locks/locks.module.js';
 import { HealthController } from './common/health/health.controller.js';
@@ -45,6 +46,7 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
     NotificationsModule,
     TodayModule,
     ReviewsModule,
+    CalendarModule,
   ],
   controllers: [HealthController],
   providers: [

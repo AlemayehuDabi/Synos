@@ -1,5 +1,7 @@
 import 'reflect-metadata';
 import { describe, expect, it, vi } from 'vitest';
+import { CALENDAR_BLOCK_CONTRIBUTOR_METADATA } from '../../src/calendar/calendar-block-contributor.js';
+import { CalendarBlockRegistryService } from '../../src/calendar/calendar-block-registry.service.js';
 import { REVIEW_CONTRIBUTOR_METADATA } from '../../src/reviews/review-contributor.js';
 import { ReviewRegistryService } from '../../src/reviews/review-registry.service.js';
 import { TODAY_CONTRIBUTOR_METADATA } from '../../src/today/today-contributor.js';
@@ -18,6 +20,7 @@ const withCollect = () => ({ collect: vi.fn() });
 describe.each([
   ['TodayRegistryService', TodayRegistryService, TODAY_CONTRIBUTOR_METADATA, '@TodayContributor'],
   ['ReviewRegistryService', ReviewRegistryService, REVIEW_CONTRIBUTOR_METADATA, '@ReviewContributor'],
+  ['CalendarBlockRegistryService', CalendarBlockRegistryService, CALENDAR_BLOCK_CONTRIBUTOR_METADATA, '@CalendarBlockContributor'],
 ] as const)('%s', (_name, Registry, key, decorator) => {
   it('registers a contributor per known domain', () => {
     const tasks = withCollect();

@@ -103,9 +103,12 @@ and malformed contributors), review generation (idempotency, isolation, locking,
 timezones and week starts), notifications (dedupe, unread counts, preferences,
 quiet hours, push retries and invalid-token cleanup, inbox-suggestion batching),
 export inclusion, account-deletion cascade and retention, in
-`test/e2e/today-reviews-notifications/`. Better Auth's sign-up/sign-in
-rate limits stay enabled in e2e (5 per minute), so keep each spec file to at most
-5 `signUpAndVerify` calls.
+`test/e2e/today-reviews-notifications/`, and calendar (CRUD, all edit/delete
+scopes, client-supplied ids, idempotent create, view merging with a failing and a
+timing-out soft-block contributor, free-slot computation, tombstone exclusion,
+export inclusion and account-deletion cascade) in `test/e2e/calendar/`. Better
+Auth's sign-up/sign-in rate limits stay enabled in e2e (5 per minute), so keep
+each spec file to at most 5 `signUpAndVerify` calls.
 
 ## Adding a data export contributor
 
@@ -736,6 +739,109 @@ Where the brief was ambiguous, and things worth knowing:
   through `ReviewGenerationService` with a given `now`, so the hourly schedule can't fire in
   the middle of a test, and real activity left in the shared test database can never fall inside
   the periods being asserted on.
+
+## Calendar
+
+Calendar owns hard events only. Other domains can contribute two things to it,
+read-only, without Calendar ever writing into their data: a **soft block** (busy or
+informational time on `GET /calendar/view`/`free-slots`) and, like every other
+module, a `TodayContributor`/`ReviewContributor` (see
+[Today, reviews and notifications](#today-reviews-and-notifications)). Calendar
+itself registers `@TodayContributor('calendar')` (today's events) and
+`@ReviewContributor('calendar')` (event count and scheduled hours for the period).
+
+| Route | What it does |
+| --- | --- |
+| `GET /api/v1/calendar/view?from&to&timezone?` | Expanded events + soft blocks merged, sorted by start, max 62 days |
+| `GET /api/v1/calendar/free-slots?from&to&duration&dayStart?&dayEnd?&limit?` | Free windows of at least `duration` minutes |
+| `GET /api/v1/calendar/events?from?&to?` | Cursor-paginated master records (not expanded) |
+| `POST /api/v1/calendar/events` | Create (accepts `Idempotency-Key`) |
+| `GET/PATCH/DELETE /api/v1/calendar/events/:id` | PATCH/DELETE take `scope` and `occurrenceStart` |
+
+Owner-scoped, validated, documented in OpenAPI (`/docs`), standard error shape.
+
+### Events, all-day and recurrence
+
+An event is timed (`startsAt`/`endsAt` are ISO-8601 instants, plus a `timezone`
+recurrence is expanded in) or all-day (`startsAt`/`endsAt` are `"YYYY-MM-DD"`, both
+inclusive - the first and last day; `timezone` is accepted but not used for the
+dates themselves, which are calendar arithmetic and never shift with DST). The
+client may supply the event's `id`; creating one that already exists is a 409.
+
+`rrule` is an RRULE value - `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY`, `INTERVAL`,
+`BYDAY` (multiple weekdays, and nth/last with an ordinal like `2TU` or `-1FR`),
+`BYMONTHDAY`, `BYMONTH`, `BYSETPOS`, `WKST`, and `COUNT` or `UNTIL` (not both) -
+with `UNTIL` written as a normal ISO date/instant, not the RFC 5545 wire token.
+Sub-daily frequencies and anything outside that list are rejected. A rule that can
+never produce an occurrence (e.g. February 30 every year) is rejected too.
+
+Editing or deleting a recurring event takes `scope` (`this` | `following` | `all`,
+default `all`) and, for `this`/`following`, `occurrenceStart` - that occurrence's
+*unmodified* start (every occurrence in a `view` response carries its own
+`originalStart` for exactly this purpose, even one a `this` edit has since moved or
+renamed):
+
+- **`this`** creates or updates an exception for just that occurrence. PATCH
+  returns the occurrence, not the event.
+- **`following`** truncates the series' `UNTIL` to just before the split and
+  creates a new series from that occurrence carrying the change; exceptions at or
+  after the split move to the new series if its (possibly changed) pattern still
+  produces them, and are dropped otherwise. Splitting at the series' own first
+  occurrence is the same as `all`.
+- **`all`** updates the master directly and remaps every exception the same way.
+
+### Registering a `CalendarBlockContributor`
+
+```ts
+import { Injectable } from '@nestjs/common';
+import { CalendarBlockContributor, type CalendarBlockContext, type Block } from '../calendar/index.js';
+
+@Injectable()
+@CalendarBlockContributor('finances') // one of the SignalDomain values; at most one per domain
+export class FinancesCalendarBlocks implements CalendarBlockContributor {
+  constructor(private readonly bills: BillsService) {}
+
+  async collect({ userId, from, to, timezone }: CalendarBlockContext): Promise<Block[]> {
+    const due = await this.bills.dueBetween(userId, from, to);
+    return due.map((bill) => ({
+      id: bill.id,
+      domain: 'finances',
+      title: `${bill.name} due`,
+      startsAt: bill.dueAt,
+      endsAt: bill.dueAt,
+      allDay: true,
+      busy: false, // shows on the timeline but never blocks a free slot
+      ref: { billId: bill.id },
+    }));
+  }
+}
+```
+
+List it in your module's `providers`; nothing in the Calendar module changes.
+Contributors run in parallel, each with its own budget
+(`CALENDAR_CONTRIBUTOR_TIMEOUT_MS`); one that throws, answers in the wrong shape,
+or is too slow only turns its own `contributors[]` entry into `error`/`timeout` -
+`view`/`free-slots` never fail because of it, and only ids/domains are logged. A
+calendar event itself is always busy; a `Block` says so explicitly with `busy`.
+
+### Environment variables
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `CALENDAR_CONTRIBUTOR_TIMEOUT_MS` | `1500` | How long each domain gets to answer a soft-block request before its section is `timeout` |
+| `CALENDAR_MAX_OCCURRENCES_PER_QUERY` | `2000` | Events + blocks combined a single `view`/`free-slots` request may expand before it is rejected |
+| `CALENDAR_TOMBSTONE_RETENTION_DAYS` | `90` | Deleted events are hard-deleted (cascading their exceptions) this many days after deletion |
+
+`GET /calendar/view` and `/free-slots` also reject a `from`/`to` more than three
+years from today, in either direction - independent of the two env vars above, and
+not configurable. This exists because the RRULE engine's `between()`/`previous()`/
+`next()` are only reliably fast for a target close to "now"; a query far from it
+can take seconds, and a handful of them measurably and permanently slow down every
+later recurrence calculation for the rest of the process's life. Nothing in this
+API ever asks the engine for a target outside that window: `view`/`free-slots` are
+bounded by the horizon above, and writing an event only ever searches at (or a
+bounded walk from) its own `DTSTART`, which stays fast regardless of how far that
+`DTSTART` itself is from today.
 
 ## Local Postgres without Docker
 

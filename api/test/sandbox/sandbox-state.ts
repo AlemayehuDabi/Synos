@@ -1,3 +1,4 @@
+import type { Block, CalendarBlockContext } from '../../src/calendar/calendar-block-contributor.js';
 import type { ReviewContext } from '../../src/reviews/review-contributor.js';
 import type { TodayContext } from '../../src/today/today-contributor.js';
 
@@ -10,10 +11,14 @@ export const sandboxState = {
   tasksByUser: new Map<string, number>(),
   todayContexts: [] as TodayContext[],
   reviewContexts: [] as ReviewContext[],
+  calendarBlocksByUser: new Map<string, Block[]>(),
+  calendarBlockContexts: [] as CalendarBlockContext[],
   reset(): void {
     this.tasksByUser.clear();
     this.todayContexts.length = 0;
     this.reviewContexts.length = 0;
+    this.calendarBlocksByUser.clear();
+    this.calendarBlockContexts.length = 0;
   },
 };
 

@@ -50,12 +50,15 @@ describe('Today (e2e)', () => {
     expect(res.body.timezone).toBe('UTC');
     expect(res.body.inbox).toEqual({ pending: 0 });
     expect(res.body.sections.map((section: { domain: string }) => `${section.domain}:${section.status}`)).toEqual([
-      'calendar:ok',
+      'calendar:ok', // the real Calendar module's own @TodayContributor('calendar'); this user has no events
       'tasks:ok',
       'habits:error',
+      'fitness:ok', // the sandbox fixture that records the context it was handed
       'finances:timeout',
       'meals:error',
     ]);
+    const calendar = res.body.sections.find((section: { domain: string }) => section.domain === 'calendar');
+    expect(calendar).toEqual({ domain: 'calendar', status: 'ok', summary: { count: 0 }, items: [] });
 
     const tasks = res.body.sections.find((section: { domain: string }) => section.domain === 'tasks');
     expect(tasks.summary).toMatchObject({ open: 2 });

@@ -35,6 +35,8 @@ model User {
   notificationSettings      NotificationSettings?
   notificationPushThrottles NotificationPushThrottle[]
 
+  calendarEvents CalendarEvent[]
+
   @@unique([email])
   @@map("user")
 }
@@ -445,4 +447,76 @@ model NotificationPushThrottle {
 
   @@unique([userId, category])
   @@map("notification_push_throttles")
+}
+
+// ---------------------------------------------------------------------------
+// Calendar
+// ---------------------------------------------------------------------------
+
+enum CalendarEventSource {
+  manual
+  suggestion
+  auto
+  sync
+}
+
+enum CalendarExceptionKind {
+  cancelled
+  modified
+}
+
+/// A hard event. Timed events store UTC instants plus the IANA `timezone` the
+/// event lives in (recurrence is expanded in that zone, so wall-clock time is
+/// kept across DST). All-day events store dates as UTC midnights: `startsAt` is
+/// the first day, `endsAt` the day after the last (exclusive). `rrule` is an
+/// RFC 5545 RRULE value; `seriesUntil` is the end of the last occurrence
+/// (null for an open-ended series or a single event). `deletedAt` marks a tombstone.
+model CalendarEvent {
+  id          String              @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  userId      String              @db.Uuid
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  notes       String?
+  location    String?
+  color       String?
+  allDay      Boolean             @default(false)
+  startsAt    DateTime
+  endsAt      DateTime
+  timezone    String
+  rrule       String?
+  seriesUntil DateTime?
+  source      CalendarEventSource @default(manual)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  deletedAt   DateTime?
+
+  exceptions CalendarEventException[]
+
+  @@index([userId, startsAt])
+  @@index([userId, seriesUntil])
+  @@index([deletedAt])
+  @@map("calendar_events")
+}
+
+/// One changed or removed occurrence of a recurring event, keyed by the
+/// occurrence's original start (the instant, or UTC midnight of the date for
+/// all-day events). The override columns only apply to `modified`; null means
+/// "same as the series".
+model CalendarEventException {
+  id            String                @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  eventId       String                @db.Uuid
+  event         CalendarEvent         @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  originalStart DateTime
+  kind          CalendarExceptionKind
+  title         String?
+  notes         String?
+  location      String?
+  color         String?
+  startsAt      DateTime?
+  endsAt        DateTime?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  @@unique([eventId, originalStart])
+  @@map("calendar_event_exceptions")
 }

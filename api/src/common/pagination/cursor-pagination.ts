@@ -63,14 +63,16 @@ export function decodeCompoundCursor(cursor: string): DecodedCompoundCursor {
 }
 
 /**
- * Prisma `where` fragment for "strictly before this (sortValue, id) pair" when
- * paginating newest-first (ORDER BY [sortField] desc, id desc).
+ * Prisma `where` fragment for "strictly before this (sortValue, id) pair" (or, with
+ * `direction: 'asc'`, "strictly after"), matching `ORDER BY [sortField] {direction}, id
+ * {direction}`. Defaults to `desc`, the newest-first convention most list endpoints use.
  */
-export function compoundCursorWhere(sortField: string, cursor: DecodedCompoundCursor) {
+export function compoundCursorWhere(sortField: string, cursor: DecodedCompoundCursor, direction: 'asc' | 'desc' = 'desc') {
+  const op = direction === 'desc' ? 'lt' : 'gt';
   return {
     OR: [
-      { [sortField]: { lt: cursor.sortValue } },
-      { [sortField]: { equals: cursor.sortValue }, id: { lt: cursor.id } },
+      { [sortField]: { [op]: cursor.sortValue } },
+      { [sortField]: { equals: cursor.sortValue }, id: { [op]: cursor.id } },
     ],
   };
 }

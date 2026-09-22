@@ -87,6 +87,21 @@ export function startOfLocalDay(date: string, timezone: string): Date {
   return new Date(instant);
 }
 
+/**
+ * The instant at which "HH:mm" happens on calendar date "YYYY-MM-DD" in `timezone`, DST-corrected
+ * the same way `startOfLocalDay` is. Unlike midnight, a working-hours boundary is never itself
+ * skipped by a DST transition in practice, so no further fallback is needed here.
+ */
+export function instantAtLocalTimeOfDay(date: string, hhmm: string, timezone: string): Date {
+  const [year, month, day] = date.split('-').map(Number);
+  const [hour, minute] = hhmm.split(':').map(Number);
+  const utcGuess = Date.UTC(year, month - 1, day, hour, minute);
+  const firstOffset = timezoneOffsetMs(new Date(utcGuess), timezone);
+  const instant = utcGuess - firstOffset;
+  const secondOffset = timezoneOffsetMs(new Date(instant), timezone);
+  return new Date(secondOffset === firstOffset ? instant : utcGuess - secondOffset);
+}
+
 // --- pure calendar arithmetic on "YYYY-MM-DD" strings (timezone independent) ---
 
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -127,4 +142,9 @@ export function firstDayOfMonth(date: string): string {
 export function lastDayOfMonth(date: string): string {
   const [year, month] = date.split('-').map(Number);
   return fromUtcDate(new Date(Date.UTC(year, month, 0)));
+}
+
+/** How many days `to` is after `from` ("YYYY-MM-DD" each); negative when `to` is earlier. */
+export function daysBetweenDates(from: string, to: string): number {
+  return Math.round((toUtcDate(to).getTime() - toUtcDate(from).getTime()) / 86_400_000);
 }
