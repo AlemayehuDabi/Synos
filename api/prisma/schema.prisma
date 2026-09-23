@@ -41,6 +41,9 @@ model User {
   subtasks        Subtask[]
   taskCompletions TaskCompletion[]
 
+  habits       Habit[]
+  habitEntries HabitEntry[]
+
   @@unique([email])
   @@map("user")
 }
@@ -662,4 +665,86 @@ model TaskCompletion {
 
   @@index([userId, completedAt])
   @@map("task_completions")
+}
+
+enum HabitType {
+  build
+  break
+}
+
+/// `daily`/`weekly` need no extra configuration; `specificDays` restricts to
+/// `scheduleDays`; `timesPerWeek`/`timesPerMonth` require `targetPerPeriod`
+/// check-ins within the period rather than specific days.
+enum HabitSchedule {
+  daily
+  weekly
+  specificDays
+  timesPerWeek
+  timesPerMonth
+}
+
+enum HabitSource {
+  manual
+  suggestion
+  auto
+}
+
+enum HabitEntryStatus {
+  done
+  slipped
+}
+
+/// A habit to build or break. Streaks and stats (GET /habits/:id/stats) are computed
+/// on read against `schedule`/`scheduleDays`/`targetPerPeriod`, never stored. `timezone`
+/// is what the habit's schedule (which calendar day is "today") is evaluated in.
+/// `deletedAt` marks a tombstone.
+model Habit {
+  id              String        @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  userId          String        @db.Uuid
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title           String
+  notes           String?
+  type            HabitType
+  schedule        HabitSchedule
+  scheduleDays    Int[]         @default([])
+  targetPerPeriod Int?
+  timezone        String
+  color           String?
+  isArchived      Boolean       @default(false)
+  archivedAt      DateTime?
+  source          HabitSource   @default(manual)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  deletedAt       DateTime?
+
+  entries HabitEntry[]
+
+  @@index([userId, isArchived])
+  @@index([deletedAt])
+  @@map("habits")
+}
+
+/// One check-in for a habit on a given calendar date, stored as a UTC midnight instant
+/// (same convention as Calendar's all-day events - see CalendarEvent). `status` is `done`
+/// (completed a `build` habit) or `slipped` (broke a `break` habit, or explicitly missed a
+/// `build` one - see the streak/grace rules in the Habits README section). `deletedAt`
+/// marks a tombstone. The (habitId, date) uniqueness is what makes POST an upsert: at
+/// most one entry per habit per date.
+model HabitEntry {
+  id        String           @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  habitId   String           @db.Uuid
+  habit     Habit            @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  userId    String           @db.Uuid
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      DateTime
+  status    HabitEntryStatus
+  note      String?
+  source    HabitSource      @default(manual)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  deletedAt DateTime?
+
+  @@unique([habitId, date])
+  @@index([userId, date])
+  @@map("habit_entries")
 }
