@@ -15,29 +15,30 @@ export async function createEngineTestApp(): Promise<{
   return { app, sentMails, facade };
 }
 
-export interface WorkoutCompletedPayload {
-  workoutId: string;
-  completedAt: string;
-  durationMinutes: number;
-  workoutType: string;
+export interface GroceryCostPayload {
+  groceryListId: string;
+  estimatedCostCents: number;
+  currency: string;
+  periodStart: string;
+  periodEnd: string;
 }
 
-export function workoutCompletedPayload(workoutId: string): WorkoutCompletedPayload {
-  return { workoutId, completedAt: '2026-10-01T07:00:00Z', durationMinutes: 45, workoutType: 'run' };
+export function groceryCostPayload(groceryListId: string): GroceryCostPayload {
+  return { groceryListId, estimatedCostCents: 4500, currency: 'USD', periodStart: '2026-10-01', periodEnd: '2026-10-07' };
 }
 
-/** Emits a real "workout.completed" signal; the sandbox rule picks the fake action type from the workoutId prefix. */
-export async function emitWorkoutCompleted(facade: SignalEngineFacade, userId: string, prefix = '') {
-  const payload = workoutCompletedPayload(`${prefix}${randomUUID()}`);
-  const signal = await facade.emit({ userId, type: 'workout.completed', payload });
+/** Emits a real "grocery.cost" signal; the sandbox rule picks the fake action type from the groceryListId prefix. */
+export async function emitGroceryCost(facade: SignalEngineFacade, userId: string, prefix = '') {
+  const payload = groceryCostPayload(`${prefix}${randomUUID()}`);
+  const signal = await facade.emit({ userId, type: 'grocery.cost', payload });
   return { signal, payload };
 }
 
-/** Finds the suggestion the sandbox rule produced for a given workoutId (any status). */
+/** Finds the suggestion the sandbox rule produced for a given groceryListId (any status). */
 export async function findSuggestion(
   app: INestApplication,
   token: string,
-  workoutId: string,
+  groceryListId: string,
   status: 'pending' | 'approved' | 'auto_applied' | 'superseded' | 'failed' | 'dismissed' = 'pending',
 ) {
   const res = await request(app.getHttpServer())
@@ -45,5 +46,5 @@ export async function findSuggestion(
     .query({ status, limit: 100 })
     .set(bearer(token))
     .expect(200);
-  return res.body.items.find((s: { targetKey: string }) => s.targetKey === `sandbox:workout:${workoutId}`);
+  return res.body.items.find((s: { targetKey: string }) => s.targetKey === `sandbox:grocery:${groceryListId}`);
 }

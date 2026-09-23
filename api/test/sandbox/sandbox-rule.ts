@@ -7,53 +7,55 @@ import {
   SANDBOX_ACTION_THROWS,
 } from './sandbox-handlers.js';
 
-interface WorkoutCompletedPayload {
-  workoutId: string;
-  completedAt: string;
-  durationMinutes: number;
-  workoutType: string;
+interface GroceryCostPayload {
+  groceryListId: string;
+  estimatedCostCents: number;
+  currency: string;
+  periodStart: string;
+  periodEnd: string;
 }
 
 /**
- * Stands in for the real "workout-to-habit" rule a future fitness/habits
+ * Stands in for the real "grocery-cost-to-budget" rule a future meals/finances
  * domain would provide. Which fake action type it proposes is picked from a
- * prefix on workoutId, so e2e tests can drive every handler outcome (success,
- * non-revertible, throw, conflict) through the real "workout.completed" signal
+ * prefix on groceryListId, so e2e tests can drive every handler outcome (success,
+ * non-revertible, throw, conflict) through the real "grocery.cost" signal
  * without needing a fake connection (connections are fixed - see
- * catalog/connections.ts). Was "bill-to-reminder" until the Tasks module
- * supplied a real rule for that connection; moved here, the one connection
- * still fully unimplemented (fitness and habits do not exist yet either).
+ * catalog/connections.ts). Was "workout-to-habit" until the Habits module
+ * supplied a real rule for that connection; moved here, since both neither-
+ * side-yet-built connections (this one and "budget-overrun-to-cheaper-meals")
+ * are now the only ones fully unclaimed.
  */
 @Injectable()
-@ConnectionRule('workout-to-habit')
-export class SandboxWorkoutRule implements ConnectionRule {
+@ConnectionRule('grocery-cost-to-budget')
+export class SandboxGroceryRule implements ConnectionRule {
   async evaluate(ctx: RuleContext): Promise<ProposalDraft[]> {
-    const payload = ctx.signal.payload as WorkoutCompletedPayload;
+    const payload = ctx.signal.payload as GroceryCostPayload;
 
     // Simulates a rule-level failure (as opposed to a handler-level one), the
     // kind the sweeper's retry/backoff and max-attempts logic exists for.
-    if (payload.workoutId.startsWith('rule-throws-')) {
+    if (payload.groceryListId.startsWith('rule-throws-')) {
       throw new Error('sandbox rule intentionally threw');
     }
 
-    const actionType = pickActionType(payload.workoutId);
+    const actionType = pickActionType(payload.groceryListId);
 
     return [
       {
-        title: `Log habit for workout ${payload.workoutId}`,
-        body: `Sandbox-generated reminder for testing (${payload.durationMinutes} min ${payload.workoutType}).`,
+        title: `Log habit for grocery list ${payload.groceryListId}`,
+        body: `Sandbox-generated reminder for testing (${(payload.estimatedCostCents / 100).toFixed(2)} ${payload.currency}).`,
         actionType,
-        params: { workoutId: payload.workoutId },
-        targetKey: `sandbox:workout:${payload.workoutId}`,
+        params: { groceryListId: payload.groceryListId },
+        targetKey: `sandbox:grocery:${payload.groceryListId}`,
         dedupeKey: `${ctx.signal.id}:${actionType}`,
       },
     ];
   }
 }
 
-function pickActionType(workoutId: string): string {
-  if (workoutId.startsWith('conflict-')) return SANDBOX_ACTION_CONFLICT;
-  if (workoutId.startsWith('throws-')) return SANDBOX_ACTION_THROWS;
-  if (workoutId.startsWith('norevert-')) return SANDBOX_ACTION_NON_REVERTIBLE;
+function pickActionType(groceryListId: string): string {
+  if (groceryListId.startsWith('conflict-')) return SANDBOX_ACTION_CONFLICT;
+  if (groceryListId.startsWith('throws-')) return SANDBOX_ACTION_THROWS;
+  if (groceryListId.startsWith('norevert-')) return SANDBOX_ACTION_NON_REVERTIBLE;
   return SANDBOX_ACTION_APPLY;
 }

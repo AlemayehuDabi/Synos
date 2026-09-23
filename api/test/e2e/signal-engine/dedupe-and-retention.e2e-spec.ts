@@ -7,7 +7,7 @@ import { SweeperCron } from '../../../src/signal-engine/bus/sweeper.cron.js';
 import { SuggestionsService } from '../../../src/signal-engine/services/suggestions.service.js';
 import type { SignalEngineFacade } from '../../../src/signal-engine/signal-engine.facade.js';
 import { bearer, type SentMail, signUpAndVerify, type TestUser } from '../helpers.js';
-import { createEngineTestApp, emitWorkoutCompleted } from './support.js';
+import { createEngineTestApp, emitGroceryCost } from './support.js';
 
 describe('Signal engine: dedupe, sweeper retries, expiry (e2e)', () => {
   let app: INestApplication;
@@ -33,19 +33,19 @@ describe('Signal engine: dedupe, sweeper retries, expiry (e2e)', () => {
   });
 
   it('reprocessing the same signal creates no duplicate suggestion', async () => {
-    const { signal, payload } = await emitWorkoutCompleted(facade, user.userId);
+    const { signal, payload } = await emitGroceryCost(facade, user.userId);
 
     // The fast path already processed it once; reprocess it directly to simulate
     // the sweeper picking up a signal that was already handled.
     await processor.processSignal(signal.id);
     await processor.processSignal(signal.id);
 
-    const matches = await prisma.suggestion.findMany({ where: { targetKey: `sandbox:workout:${payload.workoutId}` } });
+    const matches = await prisma.suggestion.findMany({ where: { targetKey: `sandbox:grocery:${payload.groceryListId}` } });
     expect(matches).toHaveLength(1);
   });
 
   it('the sweeper retries a failing signal with backoff and stops after 5 attempts', async () => {
-    const { signal } = await emitWorkoutCompleted(facade, user.userId, 'rule-throws-');
+    const { signal } = await emitGroceryCost(facade, user.userId, 'rule-throws-');
 
     for (let i = 0; i < 5; i += 1) {
       await prisma.signal.update({ where: { id: signal.id }, data: { nextAttemptAt: new Date(0) } });
@@ -65,9 +65,9 @@ describe('Signal engine: dedupe, sweeper retries, expiry (e2e)', () => {
   });
 
   it('the expiry cron expires pending suggestions past their expiresAt', async () => {
-    const { payload } = await emitWorkoutCompleted(facade, user.userId);
+    const { payload } = await emitGroceryCost(facade, user.userId);
     const suggestion = await prisma.suggestion.findFirstOrThrow({
-      where: { targetKey: `sandbox:workout:${payload.workoutId}` },
+      where: { targetKey: `sandbox:grocery:${payload.groceryListId}` },
     });
     await prisma.suggestion.update({ where: { id: suggestion.id }, data: { expiresAt: new Date(0) } });
 
@@ -104,12 +104,12 @@ describe('Signal engine: per-connection pending cap (e2e)', () => {
   it('drops the oldest pending suggestions once the cap (20) is exceeded', async () => {
     for (let i = 0; i < 21; i += 1) {
       // eslint-disable-next-line no-await-in-loop
-      await emitWorkoutCompleted(facade, user.userId);
+      await emitGroceryCost(facade, user.userId);
     }
 
     const res = await request(app.getHttpServer())
       .get('/api/v1/inbox')
-      .query({ connectionId: 'workout-to-habit', status: 'pending', limit: 100 })
+      .query({ connectionId: 'grocery-cost-to-budget', status: 'pending', limit: 100 })
       .set(bearer(user.token))
       .expect(200);
 
@@ -117,7 +117,7 @@ describe('Signal engine: per-connection pending cap (e2e)', () => {
 
     const expiredRes = await request(app.getHttpServer())
       .get('/api/v1/inbox')
-      .query({ connectionId: 'workout-to-habit', status: 'expired', limit: 100 })
+      .query({ connectionId: 'grocery-cost-to-budget', status: 'expired', limit: 100 })
       .set(bearer(user.token))
       .expect(200);
     expect(expiredRes.body.items.length).toBeGreaterThanOrEqual(1);

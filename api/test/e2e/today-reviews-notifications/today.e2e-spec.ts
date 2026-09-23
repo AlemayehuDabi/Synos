@@ -7,7 +7,7 @@ import { SandboxModule } from '../../sandbox/sandbox.module.js';
 import { sandboxState } from '../../sandbox/sandbox-state.js';
 import { SandboxTodayModule } from '../../sandbox/today-contributors.js';
 import { bearer, createTestApp, type SentMail, signUpAndVerify, type TestUser, updateSettings } from '../helpers.js';
-import { emitWorkoutCompleted } from '../signal-engine/support.js';
+import { emitGroceryCost } from '../signal-engine/support.js';
 import { SignalEngineFacade } from '../../../src/signal-engine/signal-engine.facade.js';
 
 describe('Today (e2e)', () => {
@@ -124,8 +124,8 @@ describe('Today (e2e)', () => {
   });
 
   it('reports how many suggestions are waiting in the inbox, per user', async () => {
-    await emitWorkoutCompleted(facade, userA.userId);
-    await emitWorkoutCompleted(facade, userA.userId);
+    await emitGroceryCost(facade, userA.userId);
+    await emitGroceryCost(facade, userA.userId);
 
     expect((await today(userA).expect(200)).body.inbox).toEqual({ pending: 2 });
     expect((await today(userB).expect(200)).body.inbox).toEqual({ pending: 0 });

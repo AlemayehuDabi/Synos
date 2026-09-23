@@ -2,7 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { bearer, type SentMail, signUpAndVerify, type TestUser } from '../helpers.js';
-import { createEngineTestApp, emitWorkoutCompleted } from './support.js';
+import { createEngineTestApp, emitGroceryCost } from './support.js';
 import type { SignalEngineFacade } from '../../../src/signal-engine/signal-engine.facade.js';
 
 describe('Signal engine: manual approve failure modes (e2e)', () => {
@@ -21,9 +21,9 @@ describe('Signal engine: manual approve failure modes (e2e)', () => {
   });
 
   async function pendingSuggestionFor(billIdPrefix: string) {
-    const { payload } = await emitWorkoutCompleted(facade, user.userId, billIdPrefix);
+    const { payload } = await emitGroceryCost(facade, user.userId, billIdPrefix);
     const inboxRes = await request(app.getHttpServer()).get('/api/v1/inbox').set(bearer(user.token)).expect(200);
-    return inboxRes.body.items.find((s: { targetKey: string }) => s.targetKey === `sandbox:workout:${payload.workoutId}`);
+    return inboxRes.body.items.find((s: { targetKey: string }) => s.targetKey === `sandbox:grocery:${payload.groceryListId}`);
   }
 
   it('approving a suggestion whose handler conflicts returns 409 and marks it superseded', async () => {

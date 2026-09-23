@@ -14,7 +14,7 @@ import { FakePushProvider } from '../../sandbox/fake-push-provider.js';
 import { SandboxModule } from '../../sandbox/sandbox.module.js';
 import { TrackingJobRunner } from '../../sandbox/tracking-job-runner.js';
 import { bearer, createTestApp, registerDevice, type SentMail, signUpAndVerify, type TestUser } from '../helpers.js';
-import { emitWorkoutCompleted, findSuggestion } from '../signal-engine/support.js';
+import { emitGroceryCost, findSuggestion } from '../signal-engine/support.js';
 
 interface InboxNotification {
   category: string;
@@ -71,21 +71,21 @@ describe('Inbox suggestion notifications (e2e)', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('turns a new pending suggestion into an in-app notification and a push', async () => {
-    const { payload } = await emitWorkoutCompleted(engine, userA.userId);
+    const { payload } = await emitGroceryCost(engine, userA.userId);
     await settle();
 
-    const suggestion = await findSuggestion(app, userA.token, payload.workoutId);
+    const suggestion = await findSuggestion(app, userA.token, payload.groceryListId);
     expect(suggestion).toBeTruthy();
 
     const notifications = await inboxNotifications(userA);
     expect(notifications).toHaveLength(1);
     expect(notifications[0]).toMatchObject({
       category: 'inbox_suggestion',
-      domain: 'habits', // the connection's target domain
+      domain: 'finances', // the connection's target domain
       title: 'New suggestion',
       body: suggestion.title,
       readAt: null,
-      data: { suggestionId: suggestion.id, connectionId: 'workout-to-habit' },
+      data: { suggestionId: suggestion.id, connectionId: 'grocery-cost-to-budget' },
     });
 
     expect(push.sent).toHaveLength(1);
@@ -98,8 +98,8 @@ describe('Inbox suggestion notifications (e2e)', () => {
   });
 
   it('still notifies in-app for every suggestion, but pushes at most once a minute', async () => {
-    await emitWorkoutCompleted(engine, userA.userId);
-    await emitWorkoutCompleted(engine, userA.userId);
+    await emitGroceryCost(engine, userA.userId);
+    await emitGroceryCost(engine, userA.userId);
     await settle();
 
     expect(await inboxNotifications(userA)).toHaveLength(3); // one from before, two now
@@ -108,13 +108,13 @@ describe('Inbox suggestion notifications (e2e)', () => {
 
   it('pushes again once the minute is up', async () => {
     await ageThrottle(userA);
-    await emitWorkoutCompleted(engine, userA.userId);
+    await emitGroceryCost(engine, userA.userId);
     await settle();
     expect(push.sent).toHaveLength(1);
   });
 
   it('buzzes a phone once for a burst that arrives all at once', async () => {
-    await Promise.all([emitWorkoutCompleted(engine, userB.userId), emitWorkoutCompleted(engine, userB.userId), emitWorkoutCompleted(engine, userB.userId)]);
+    await Promise.all([emitGroceryCost(engine, userB.userId), emitGroceryCost(engine, userB.userId), emitGroceryCost(engine, userB.userId)]);
     await settle();
 
     expect(await inboxNotifications(userB)).toHaveLength(3);
@@ -126,8 +126,8 @@ describe('Inbox suggestion notifications (e2e)', () => {
     await ageThrottle(userA);
     const suggestions = ['Water plants', 'Pay rent', 'Call Sam'].map((title) => ({
       id: randomUUID(),
-      connectionId: 'workout-to-habit' as const,
-      targetDomain: 'habits' as const,
+      connectionId: 'grocery-cost-to-budget' as const,
+      targetDomain: 'finances' as const,
       title,
     }));
     const before = (await inboxNotifications(userA)).length;
@@ -155,7 +155,7 @@ describe('Inbox suggestion notifications (e2e)', () => {
   describe('when a connection is in auto mode', () => {
     beforeAll(async () => {
       await request(app.getHttpServer())
-        .patch('/api/v1/connections/workout-to-habit')
+        .patch('/api/v1/connections/grocery-cost-to-budget')
         .set(bearer(userB.token))
         .send({ mode: 'auto' })
         .expect(200);
@@ -165,30 +165,30 @@ describe('Inbox suggestion notifications (e2e)', () => {
       await ageThrottle(userB);
       const before = (await inboxNotifications(userB)).length;
 
-      const { payload } = await emitWorkoutCompleted(engine, userB.userId);
+      const { payload } = await emitGroceryCost(engine, userB.userId);
       await settle();
 
-      expect(await findSuggestion(app, userB.token, payload.workoutId, 'auto_applied')).toBeTruthy();
+      expect(await findSuggestion(app, userB.token, payload.groceryListId, 'auto_applied')).toBeTruthy();
       expect(await inboxNotifications(userB)).toHaveLength(before);
       expect(push.attempts).toEqual([]);
     });
 
     it('does not notify about a suggestion that was superseded instead', async () => {
       const before = (await inboxNotifications(userB)).length;
-      const { payload } = await emitWorkoutCompleted(engine, userB.userId, 'conflict-');
+      const { payload } = await emitGroceryCost(engine, userB.userId, 'conflict-');
       await settle();
 
-      expect(await findSuggestion(app, userB.token, payload.workoutId, 'superseded')).toBeTruthy();
+      expect(await findSuggestion(app, userB.token, payload.groceryListId, 'superseded')).toBeTruthy();
       expect(await inboxNotifications(userB)).toHaveLength(before);
       expect(push.attempts).toEqual([]);
     });
 
     it('does notify when auto-apply falls back to asking the user', async () => {
       const before = (await inboxNotifications(userB)).length;
-      const { payload } = await emitWorkoutCompleted(engine, userB.userId, 'throws-');
+      const { payload } = await emitGroceryCost(engine, userB.userId, 'throws-');
       await settle();
 
-      const suggestion = await findSuggestion(app, userB.token, payload.workoutId, 'pending');
+      const suggestion = await findSuggestion(app, userB.token, payload.groceryListId, 'pending');
       expect(suggestion).toBeTruthy();
       const notifications = await inboxNotifications(userB);
       expect(notifications).toHaveLength(before + 1);
@@ -203,10 +203,10 @@ describe('Inbox suggestion notifications (e2e)', () => {
       await ageThrottle(userA);
       const before = (await inboxNotifications(userA)).length;
 
-      const { payload } = await emitWorkoutCompleted(engine, userA.userId);
+      const { payload } = await emitGroceryCost(engine, userA.userId);
       await settle();
 
-      const suggestion = await findSuggestion(app, userA.token, payload.workoutId);
+      const suggestion = await findSuggestion(app, userA.token, payload.groceryListId);
       expect(await inboxNotifications(userA)).toHaveLength(before);
       expect(push.sent).toHaveLength(1);
       expect(push.sent[0]).toMatchObject({ title: 'New suggestion', body: suggestion.title });
@@ -218,7 +218,7 @@ describe('Inbox suggestion notifications (e2e)', () => {
       await ageThrottle(userA);
       const before = (await inboxNotifications(userA)).length;
 
-      await emitWorkoutCompleted(engine, userA.userId);
+      await emitGroceryCost(engine, userA.userId);
       await settle();
 
       expect(await inboxNotifications(userA)).toHaveLength(before + 1);
@@ -236,14 +236,14 @@ describe('Inbox suggestion notifications (e2e)', () => {
       await setPreferences(userA, { quietHours: { start: hhmm(now - 60), end: hhmm(now + 60) } });
       const before = (await inboxNotifications(userA)).length;
 
-      await emitWorkoutCompleted(engine, userA.userId);
+      await emitGroceryCost(engine, userA.userId);
       await settle();
       expect(await inboxNotifications(userA)).toHaveLength(before + 1); // in-app is never suppressed
       expect(push.attempts).toEqual([]);
 
       // Nothing was sent, so the rate limit was not spent: the next suggestion after quiet hours buzzes straight away.
       await setPreferences(userA, { quietHours: null });
-      await emitWorkoutCompleted(engine, userA.userId);
+      await emitGroceryCost(engine, userA.userId);
       await settle();
       expect(push.sent).toHaveLength(1);
     });
@@ -253,10 +253,10 @@ describe('Inbox suggestion notifications (e2e)', () => {
     vi.spyOn(NotificationPreferencesService.prototype, 'loadForDelivery').mockRejectedValueOnce(new Error('db hiccup'));
     const before = (await inboxNotifications(userA)).length;
 
-    const { signal, payload } = await emitWorkoutCompleted(engine, userA.userId); // does not throw
+    const { signal, payload } = await emitGroceryCost(engine, userA.userId); // does not throw
     await settle();
 
-    expect(await findSuggestion(app, userA.token, payload.workoutId)).toBeTruthy();
+    expect(await findSuggestion(app, userA.token, payload.groceryListId)).toBeTruthy();
     expect((await prisma.signal.findUniqueOrThrow({ where: { id: signal.id } })).processedAt).not.toBeNull();
     expect(await inboxNotifications(userA)).toHaveLength(before);
   });
