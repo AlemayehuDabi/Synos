@@ -52,6 +52,12 @@ export class HabitTodayItemResponse {
   @ApiPropertyOptional({ nullable: true, enum: Object.values(HabitEntryStatus) }) entryStatus!: HabitEntryStatus | null;
 }
 
+export class HabitTodaySummaryResponse {
+  @ApiProperty() scheduledCount!: number;
+  @ApiProperty() doneCount!: number;
+}
+
 export class HabitTodayResponse {
+  @ApiProperty({ type: HabitTodaySummaryResponse }) summary!: HabitTodaySummaryResponse;
   @ApiProperty({ type: [HabitTodayItemResponse] }) items!: HabitTodayItemResponse[];
 }

@@ -24,15 +24,6 @@ export class SandboxFitnessReview implements ReviewContributor {
   }
 }
 
-/** Always throws. */
-@Injectable()
-@ReviewContributor('habits')
-export class SandboxHabitsReview implements ReviewContributor {
-  async collect(): Promise<ReviewContribution> {
-    throw new Error('SECRET-HABIT-PAYLOAD');
-  }
-}
-
 /** Far slower than REVIEW_CONTRIBUTOR_TIMEOUT_MS. */
 @Injectable()
 @ReviewContributor('finances')
@@ -43,10 +34,23 @@ export class SandboxFinancesReview implements ReviewContributor {
   }
 }
 
+/**
+ * Always throws. Was @ReviewContributor('habits') until the Habits module
+ * supplied a real one; 'meals' is the one remaining SignalDomain with no real
+ * contributor yet.
+ */
+@Injectable()
+@ReviewContributor('meals')
+export class SandboxMealsReview implements ReviewContributor {
+  async collect(): Promise<ReviewContribution> {
+    throw new Error('SECRET-MEALS-PAYLOAD');
+  }
+}
+
 /** One healthy domain. */
 @Module({ providers: [SandboxFitnessReview] })
 export class SandboxReviewModule {}
 
 /** Adds a throwing and a too-slow domain on top of SandboxReviewModule. */
-@Module({ providers: [SandboxHabitsReview, SandboxFinancesReview] })
+@Module({ providers: [SandboxMealsReview, SandboxFinancesReview] })
 export class SandboxReviewFaultsModule {}

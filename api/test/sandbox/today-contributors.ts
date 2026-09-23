@@ -16,15 +16,6 @@ export class SandboxFitnessToday implements TodayContributor {
   }
 }
 
-/** Always throws, with a message a log line must never repeat. */
-@Injectable()
-@TodayContributor('habits')
-export class SandboxHabitsToday implements TodayContributor {
-  async collect(): Promise<TodayContribution> {
-    throw new Error('SECRET-HABIT-PAYLOAD');
-  }
-}
-
 /** Far slower than TODAY_CONTRIBUTOR_TIMEOUT_MS. */
 @Injectable()
 @TodayContributor('finances')
@@ -35,17 +26,21 @@ export class SandboxFinancesToday implements TodayContributor {
   }
 }
 
-/** Answers, but not in the required shape. */
+/**
+ * Always throws, with a message a log line must never repeat. Was
+ * @TodayContributor('habits') until the Habits module supplied a real one;
+ * 'meals' is the one remaining SignalDomain with no real contributor yet.
+ */
 @Injectable()
 @TodayContributor('meals')
 export class SandboxMealsToday implements TodayContributor {
   async collect(): Promise<TodayContribution> {
-    return { summary: 'not an object', items: [{ id: 'no-title' }] } as unknown as TodayContribution;
+    throw new Error('SECRET-MEALS-PAYLOAD');
   }
 }
 
-/** Four fake domains: one healthy, one throwing, one too slow, one malformed. */
+/** Three fake domains: one healthy, one too slow, one throwing. */
 @Module({
-  providers: [SandboxFitnessToday, SandboxHabitsToday, SandboxFinancesToday, SandboxMealsToday],
+  providers: [SandboxFitnessToday, SandboxFinancesToday, SandboxMealsToday],
 })
 export class SandboxTodayModule {}

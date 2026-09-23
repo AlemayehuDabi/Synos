@@ -21,7 +21,7 @@ import { ListHabitsQueryDto } from './dto/list-habits-query.dto.js';
 import { UpdateEntryDto } from './dto/update-entry.dto.js';
 import { UpdateHabitDto } from './dto/update-habit.dto.js';
 import { UpsertEntryDto } from './dto/upsert-entry.dto.js';
-import { HabitEntryResponse, HabitPageResponse, HabitResponse, HabitStatsResponse } from './dto/responses.dto.js';
+import { HabitEntryResponse, HabitPageResponse, HabitResponse, HabitStatsResponse, HabitTodayResponse } from './dto/responses.dto.js';
 import { HabitEntryService } from './habit-entry.service.js';
 import { HabitStatsService } from './habit-stats.service.js';
 import { HabitService } from './habit.service.js';
@@ -60,6 +60,16 @@ export class HabitsController {
   @ApiConflictResponse({ type: ErrorResponse, description: 'The client-supplied `id` already exists.' })
   create(@CurrentUser() user: CurrentUserType, @Body() dto: CreateHabitDto) {
     return this.habits.create(user.id, dto);
+  }
+
+  @Get('today')
+  @ApiOperation({
+    summary: 'Today\'s habits',
+    description: 'Active habits scheduled today (per each habit\'s own schedule and timezone), with today\'s entry status if any. Same shape as the Today contributor\'s "habits" section.',
+  })
+  @ApiOkResponse({ type: HabitTodayResponse })
+  today(@CurrentUser() user: CurrentUserType) {
+    return this.habits.today(user.id);
   }
 
   @Get(':id')

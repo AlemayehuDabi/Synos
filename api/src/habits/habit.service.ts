@@ -1,11 +1,27 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type { Habit, Prisma } from '../generated/prisma/client.js';
-import type { HabitSchedule, HabitSource, HabitType } from '../generated/prisma/enums.js';
+import type { HabitEntryStatus, HabitSchedule, HabitSource, HabitType } from '../generated/prisma/enums.js';
 import { PrismaService } from '../lib/prisma.js';
+import { localDateInTimezone, startOfLocalDay, weekdayOfDate } from '../common/time/timezone.js';
 import { type CursorPage, compoundCursorWhere, decodeCompoundCursor, encodeCompoundCursor, resolvePageSize } from '../common/pagination/cursor-pagination.js';
 import type { CreateHabitDto } from './dto/create-habit.dto.js';
 import type { UpdateHabitDto } from './dto/update-habit.dto.js';
 import { toHabitView, type HabitView } from './habit.mapper.js';
+
+export interface HabitTodayItem {
+  id: string;
+  title: string;
+  type: HabitType;
+  schedule: HabitSchedule;
+  entryStatus: HabitEntryStatus | null;
+  /** Satisfies TodayItem's index signature so this can be returned directly as a TodayContribution. */
+  [key: string]: unknown;
+}
+
+export interface HabitTodayResult {
+  summary: { scheduledCount: number; doneCount: number };
+  items: HabitTodayItem[];
+}
 
 @Injectable()
 export class HabitService {
@@ -108,6 +124,28 @@ export class HabitService {
     if (habit.isArchived) return toHabitView(habit);
     const updated = await this.prisma.habit.update({ where: { id: habit.id }, data: { isArchived: true, archivedAt: new Date() } });
     return toHabitView(updated);
+  }
+
+  /** Active habits scheduled "today" (per each habit's own schedule and timezone), with today's entry status if any. */
+  async today(userId: string): Promise<HabitTodayResult> {
+    const habits = await this.prisma.habit.findMany({ where: { userId, deletedAt: null, isArchived: false } });
+    const now = new Date();
+
+    const items: HabitTodayItem[] = [];
+    let doneCount = 0;
+    for (const habit of habits) {
+      const today = localDateInTimezone(now, habit.timezone);
+      if (habit.schedule === 'specificDays' && !habit.scheduleDays.includes(weekdayOfDate(today))) continue;
+
+      // eslint-disable-next-line no-await-in-loop
+      const entry = await this.prisma.habitEntry.findFirst({
+        where: { habitId: habit.id, date: startOfLocalDay(today, 'UTC'), deletedAt: null },
+        select: { status: true },
+      });
+      if (entry?.status === 'done') doneCount += 1;
+      items.push({ id: habit.id, title: habit.title, type: habit.type, schedule: habit.schedule, entryStatus: entry?.status ?? null });
+    }
+    return { summary: { scheduledCount: items.length, doneCount }, items };
   }
 
   async findOwned(userId: string, id: string): Promise<Habit> {

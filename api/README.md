@@ -13,9 +13,11 @@ The NestJS backend for Synos. What lives here so far:
   See [Calendar](#calendar).
 - **Tasks**: quick-capture and recurring tasks, subtasks, and the bill-to-
   reminder/recovery-to-task-load connections. See [Tasks](#tasks).
+- **Habits**: build/break habits, streaks with grace, and the
+  workout-to-habit/recurring-task-to-habit connections. See [Habits](#habits).
 
-Habits, Fitness, Finances and Meals don't exist yet; the signal engine's
-connection catalog and domain enums already have room for them.
+Fitness, Finances and Meals don't exist yet; the signal engine's connection
+catalog and domain enums already have room for them.
 
 ## Stack
 
@@ -495,11 +497,12 @@ here's what was chosen and why:
 Three modules that sit on top of the domains (tasks, habits, fitness, finances,
 meals, calendar) without knowing any of them. `GET /today` and the weekly/monthly
 reviews are assembled from **contributors** that each domain declares; a domain
-tells the user something through **`NotificationsFacade`**. Calendar and Tasks
-register real contributors (`@TodayContributor`, `@ReviewContributor`, and, for
-Calendar/Tasks specifically, `@CalendarBlockContributor`); Habits, Fitness,
+tells the user something through **`NotificationsFacade`**. Calendar, Tasks and
+Habits register real contributors (`@TodayContributor`, `@ReviewContributor`,
+and, for Calendar/Tasks specifically, `@CalendarBlockContributor` - Habits
+exposes nothing there, since habits are not scheduled events); Fitness,
 Finances and Meals don't exist yet, so their sections are exercised by
-test-only fakes under `test/sandbox/`, never by code in `src/`.
+test-only fakes under `test/sandbox/`.
 
 | Route | What it does |
 | --- | --- |
@@ -953,9 +956,9 @@ connections (see [Signal engine](#signal-engine)):
   task's own still-pending suggestion and records a correction — manual edits
   are ground truth, per-task rather than per-day.
 
-`recurring-task-to-habit` (`task.recurring_pattern` → habits) is in the fixed
-connection catalog for a future Habits module to supply the rule/handler for;
-Tasks only emits the signal.
+`recurring-task-to-habit` (`task.recurring_pattern` → habits): Tasks only emits
+the signal; the Habits module supplies the rule and action handler - see
+[Habits](#habits).
 
 ### Environment variables
 
@@ -964,6 +967,102 @@ Tasks only emits the signal.
 | `TASKS_TOMBSTONE_RETENTION_DAYS` | `90` | Deleted tasks are hard-deleted (cascading their exceptions/subtasks) this many days after deletion |
 | `TASKS_PATTERN_MIN_OCCURRENCES` | `3` | How many same-title task creations within the window trigger `task.recurring_pattern` |
 | `TASKS_PATTERN_WINDOW_DAYS` | `60` | Lookback window for the recurring-pattern detector |
+
+## Habits
+
+Habits owns `Habit`/`HabitEntry`. It never writes into another domain's data,
+and exposes nothing as calendar blocks - habits are not scheduled events. It
+registers `@TodayContributor('habits')` (habits scheduled today, with today's
+entry status) and `@ReviewContributor('habits')` (completion rate/slips across
+every active habit, with a per-habit highlight where anything happened or a
+streak moved - see
+[Today, reviews and notifications](#today-reviews-and-notifications)).
+
+| Route | What it does |
+| --- | --- |
+| `GET /api/v1/habits?type&isArchived&cursor&limit` | Cursor-paginated, oldest created first |
+| `POST /api/v1/habits` | Create (accepts `Idempotency-Key`) |
+| `GET/PATCH/DELETE /api/v1/habits/:id` | |
+| `POST /api/v1/habits/:id/archive` | Idempotent |
+| `GET /api/v1/habits/:id/stats` | Current streak, best streak, `graceUsedAt` |
+| `GET /api/v1/habits/:id/entries?from&to` | Defaults to the last 30 days |
+| `POST /api/v1/habits/:id/entries` | Upserts by (habit, date) - posting the same date again updates it, not a duplicate (accepts `Idempotency-Key`); defaults to today in the habit's own timezone, status `done` |
+| `PATCH/DELETE /api/v1/habits/:id/entries/:entryId` | |
+| `GET /api/v1/habits/today` | Every active habit scheduled today with today's entry status - the same data as the Today contributor's `habits` section |
+
+Owner-scoped, validated, documented in OpenAPI (`/docs`), standard error shape.
+A client may supply a habit's `id`; creating one that already exists is a 409.
+
+### Schedule kinds
+
+`type` is `build` (checking in is the goal) or `break` (avoiding a `slipped`
+entry is the goal). `schedule` decides which calendar units count toward a
+streak - never every calendar day, the habit's own cadence:
+
+- **`daily`** - every day is a unit.
+- **`specificDays`** - only the weekdays in `scheduleDays` (`0` Sunday -
+  `6` Saturday) are units; every other day is ignored entirely, not a miss.
+- **`weekly`** - each calendar week (aligned to the caller's own
+  `weekStartsOn`) is one unit; any single check-in anywhere in the week
+  satisfies it.
+- **`timesPerWeek`** / **`timesPerMonth`** - each week/month is one unit,
+  satisfied once it has `targetPerPeriod` qualifying entries.
+
+`scheduleDays` is required for `specificDays`; `targetPerPeriod` is required
+for `timesPerWeek`/`timesPerMonth`. Both are cleared automatically when
+`PATCH` switches a habit to a schedule that doesn't use them.
+
+### Streaks and grace
+
+`current`/`best`/`graceUsedAt` (`GET /habits/:id/stats`) are computed on read
+from the habit's entries, never stored. A unit's outcome:
+
+- **`build`**: successful once it has enough `done` entries to reach the
+  unit's target (`targetPerPeriod` for `timesPerWeek`/`timesPerMonth`, `1`
+  otherwise); a unit that has already fully elapsed without reaching it is a
+  miss. One still in progress (today, or the current week/month) is neither -
+  it never breaks or extends the streak until it is over.
+- **`break`**: successful the moment a unit elapses with no `slipped` entry in
+  it; a `slipped` entry fails it immediately, even mid-unit.
+
+**Grace** (`HABITS_GRACE_WINDOW_DAYS`, default `1`): up to that many
+*consecutive* missed units are tolerated as a single gap, at most once per
+streak, provided a success follows before the tolerance is exceeded - the
+streak then keeps growing through the gap rather than merely surviving at its
+old length. `graceUsedAt` is the start date of the most recent unit a grace
+pass actually covered. A second gap while grace is still spent on the current
+streak, or a gap wider than the window, breaks it; the next success starts a
+fresh streak (and a fresh grace pass) from `1`.
+
+### Connections handled
+
+Habits supplies both the rule and the action handler for two catalog
+connections (see [Signal engine](#signal-engine)):
+
+- **`workout-to-habit`** (`workout.completed` → habits): matches the user's
+  own active `build` habit whose title mentions the workout type (e.g.
+  `workoutType: "run"` matches a habit titled "Go for a run" - there is no
+  other link between a workout and a habit), then creates/upserts a `done`
+  entry for that date with source `auto`. Never overwrites an existing manual
+  entry for that date - manual check-ins are ground truth - so apply conflicts
+  if one is already there. Revert deletes the entry if it is still the auto
+  one and untouched, otherwise conflicts.
+- **`recurring-task-to-habit`** (`task.recurring_pattern` → habits): offers to
+  turn a detected recurring task pattern into a new `build` habit, with a
+  schedule inferred from the pattern's cadence (daily/weekly/monthly-ish).
+  Revert archives the habit if it is still untouched, otherwise conflicts.
+
+A manual `HabitEntry` write (`POST`/`PATCH`/`DELETE` on `.../entries`) for a
+date that has a pending or auto-applied suggestion targeting that same
+habit/date supersedes it and records a correction - manual check-ins/slips are
+ground truth.
+
+### Environment variables
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `HABITS_TOMBSTONE_RETENTION_DAYS` | `90` | Deleted habits (and entries deleted on their own) are hard-deleted this many days after deletion |
+| `HABITS_GRACE_WINDOW_DAYS` | `1` | Consecutive missed scheduled units tolerated as a single gap before a streak breaks |
 
 ## Local Postgres without Docker
 

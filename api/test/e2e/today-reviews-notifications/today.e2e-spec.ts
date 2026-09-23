@@ -50,7 +50,7 @@ describe('Today (e2e)', () => {
     expect(res.body.sections.map((section: { domain: string }) => `${section.domain}:${section.status}`)).toEqual([
       'calendar:ok', // the real Calendar module's own @TodayContributor('calendar'); this user has no events
       'tasks:ok', // the real Tasks module's own @TodayContributor('tasks'); this user has no tasks - see the Tasks e2e suite for real behavior
-      'habits:error',
+      'habits:ok', // the real Habits module's own @TodayContributor('habits'); this user has no habits - see the Habits e2e suite for real behavior
       'fitness:ok', // the sandbox fixture that records the context it was handed
       'finances:timeout',
       'meals:error',
@@ -59,10 +59,11 @@ describe('Today (e2e)', () => {
     expect(calendar).toEqual({ domain: 'calendar', status: 'ok', summary: { count: 0 }, items: [] });
     const tasks = res.body.sections.find((section: { domain: string }) => section.domain === 'tasks');
     expect(tasks).toEqual({ domain: 'tasks', status: 'ok', summary: { dueToday: 0, overdue: 0, scheduledToday: 0 }, items: [] });
+    const habits = res.body.sections.find((section: { domain: string }) => section.domain === 'habits');
+    expect(habits).toEqual({ domain: 'habits', status: 'ok', summary: { scheduledCount: 0, doneCount: 0 }, items: [] });
 
     // A failed or slow domain carries nothing but its name and status.
     const byDomain = Object.fromEntries(res.body.sections.map((section: { domain: string }) => [section.domain, section]));
-    expect(byDomain.habits).toEqual({ domain: 'habits', status: 'error' });
     expect(byDomain.finances).toEqual({ domain: 'finances', status: 'timeout' });
     expect(byDomain.meals).toEqual({ domain: 'meals', status: 'error' });
 
@@ -75,12 +76,12 @@ describe('Today (e2e)', () => {
     const error = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
 
     const res = await today(userA).expect(200);
-    expect(JSON.stringify(res.body)).not.toContain('SECRET-HABIT-PAYLOAD');
+    expect(JSON.stringify(res.body)).not.toContain('SECRET-MEALS-PAYLOAD');
 
     const logged = [...warn.mock.calls, ...error.mock.calls].map((call) => String(call[0]));
-    expect(logged.some((line) => line.includes('"habits"') && line.includes(userA.userId))).toBe(true);
+    expect(logged.some((line) => line.includes('"meals"') && line.includes(userA.userId))).toBe(true);
     expect(logged.some((line) => line.includes('"finances"') && line.includes('timed out'))).toBe(true);
-    expect(logged.join('\n')).not.toContain('SECRET-HABIT-PAYLOAD');
+    expect(logged.join('\n')).not.toContain('SECRET-MEALS-PAYLOAD');
   });
 
   it('defaults the date to today on the user\'s own calendar and tells contributors the timezone', async () => {

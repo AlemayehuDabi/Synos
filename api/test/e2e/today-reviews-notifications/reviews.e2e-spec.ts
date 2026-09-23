@@ -131,9 +131,10 @@ describe('Reviews (e2e)', () => {
       expect(weekly.sections.map((s: { domain: string; status: string }) => `${s.domain}:${s.status}`)).toEqual([
         'calendar:ok',
         'tasks:ok',
-        'habits:error',
+        'habits:ok', // the real Habits module's own @ReviewContributor('habits'); this user has no habits - see the Habits e2e suite for real behavior
         'fitness:ok', // the sandbox fixture with a configurable completed count
         'finances:timeout',
+        'meals:error',
         'cross_domain:ok',
       ]);
       expect(weekly.sections[0]).toEqual({ domain: 'calendar', status: 'ok', metrics: { eventsCount: 0, scheduledHours: 0 }, highlights: [] });
@@ -143,10 +144,11 @@ describe('Reviews (e2e)', () => {
         metrics: { completed: 0, missed: 0, completionRate: 0, avgEstimateAccuracy: null },
         highlights: [],
       });
-      expect(weekly.sections[2]).toEqual({ domain: 'habits', status: 'error' });
+      expect(weekly.sections[2]).toEqual({ domain: 'habits', status: 'ok', metrics: { completed: 0, slips: 0, completionRate: 0 }, highlights: [] });
       expect(weekly.sections[3]).toEqual({ domain: 'fitness', status: 'ok', metrics: { completed: 0 }, highlights: [] });
       expect(weekly.sections[4]).toEqual({ domain: 'finances', status: 'timeout' });
-      expect(JSON.stringify(weekly)).not.toContain('SECRET-HABIT-PAYLOAD');
+      expect(weekly.sections[5]).toEqual({ domain: 'meals', status: 'error' });
+      expect(JSON.stringify(weekly)).not.toContain('SECRET-MEALS-PAYLOAD');
     });
 
     it('asks the contributors about the exact period, in the user\'s timezone', async () => {
