@@ -128,6 +128,14 @@ describe('Habits: signal engine integration (e2e)', () => {
       expect(applied).toBeTruthy();
       const list = await entries(user, habit.body.id, { from: today(), to: today() });
       expect(list.body).toEqual([expect.objectContaining({ status: 'done', source: 'auto' })]);
+
+      const activityRes = await activity(user, { kind: 'auto_applied' });
+      const entry = activityRes.body.items.find((a: { suggestionId: string }) => a.suggestionId === applied.id);
+      const undone = await undo(user, entry.id).expect(200);
+      expect(undone.body.status).toBe('reverted');
+
+      const afterRevert = await entries(user, habit.body.id, { from: today(), to: today() });
+      expect(afterRevert.body).toEqual([]);
     });
   });
 
