@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { HabitEntryService } from './habit-entry.service.js';
+import { HabitStatsService } from './habit-stats.service.js';
 import { HabitService } from './habit.service.js';
 import { HabitsController } from './habits.controller.js';
 
@@ -11,6 +12,6 @@ import { HabitsController } from './habits.controller.js';
  */
 @Module({
   controllers: [HabitsController],
-  providers: [HabitService, HabitEntryService],
+  providers: [HabitService, HabitEntryService, HabitStatsService],
 })
 export class HabitsModule {}

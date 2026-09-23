@@ -21,8 +21,9 @@ import { ListHabitsQueryDto } from './dto/list-habits-query.dto.js';
 import { UpdateEntryDto } from './dto/update-entry.dto.js';
 import { UpdateHabitDto } from './dto/update-habit.dto.js';
 import { UpsertEntryDto } from './dto/upsert-entry.dto.js';
-import { HabitEntryResponse, HabitPageResponse, HabitResponse } from './dto/responses.dto.js';
+import { HabitEntryResponse, HabitPageResponse, HabitResponse, HabitStatsResponse } from './dto/responses.dto.js';
 import { HabitEntryService } from './habit-entry.service.js';
+import { HabitStatsService } from './habit-stats.service.js';
 import { HabitService } from './habit.service.js';
 
 const IDEMPOTENCY_HEADER = {
@@ -39,6 +40,7 @@ export class HabitsController {
   constructor(
     private readonly habits: HabitService,
     private readonly entries: HabitEntryService,
+    private readonly stats: HabitStatsService,
   ) {}
 
   @Get()
@@ -95,6 +97,21 @@ export class HabitsController {
   @ApiNotFoundResponse({ type: ErrorResponse })
   archive(@CurrentUser() user: CurrentUserType, @Param('id', ParseUUIDPipe) id: string) {
     return this.habits.archive(user.id, id);
+  }
+
+  @Get(':id/stats')
+  @ApiOperation({
+    summary: 'Current and best streak',
+    description:
+      'Computed against the habit\'s own schedule, not every calendar day - a weekly habit\'s streak is a streak of weeks. ' +
+      'A single missed scheduled unit within HABITS_GRACE_WINDOW_DAYS does not reset the streak if the next one is completed.',
+  })
+  @ApiOkResponse({ type: HabitStatsResponse })
+  @ApiBadRequestResponse({ type: ErrorResponse })
+  @ApiNotFoundResponse({ type: ErrorResponse })
+  async getStats(@CurrentUser() user: CurrentUserType, @Param('id', ParseUUIDPipe) id: string) {
+    const result = await this.stats.stats(user.id, id);
+    return { habitId: id, ...result };
   }
 
   @Get(':id/entries')
