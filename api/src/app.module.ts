@@ -16,6 +16,7 @@ import { TodayModule } from './today/today.module.js';
 import { ReviewsModule } from './reviews/reviews.module.js';
 import { CalendarModule } from './calendar/calendar.module.js';
 import { TasksModule } from './tasks/tasks.module.js';
+import { HabitsModule } from './habits/habits.module.js';
 import { JobsModule } from './common/jobs/jobs.module.js';
 import { LocksModule } from './common/locks/locks.module.js';
 import { HealthController } from './common/health/health.controller.js';
@@ -49,6 +50,7 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
     ReviewsModule,
     CalendarModule,
     TasksModule,
+    HabitsModule,
   ],
   controllers: [HealthController],
   providers: [
