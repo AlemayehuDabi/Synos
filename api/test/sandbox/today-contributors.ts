@@ -2,23 +2,10 @@ import { Injectable, Module } from '@nestjs/common';
 import { TodayContributor, type TodayContext, type TodayContribution } from '../../src/today/today-contributor.js';
 import { sandboxState, sleep } from './sandbox-state.js';
 
-/** Healthy: the number of "open tasks" depends on the user, so isolation is observable. */
-@Injectable()
-@TodayContributor('tasks')
-export class SandboxTasksToday implements TodayContributor {
-  async collect({ userId, date }: TodayContext): Promise<TodayContribution> {
-    const open = sandboxState.tasksByUser.get(userId) ?? 0;
-    return {
-      summary: { open, date },
-      items: Array.from({ length: open }, (_, index) => ({ id: `task-${index + 1}`, title: `Task ${index + 1}`, done: false })),
-    };
-  }
-}
-
 /**
  * Records the context it was handed, so specs can check the date and timezone. Uses
  * 'fitness', the one SignalDomain none of the other fixtures here or the real Calendar
- * module's own @TodayContributor('calendar') claims.
+ * and Tasks modules' own @TodayContributor('calendar')/@TodayContributor('tasks') claim.
  */
 @Injectable()
 @TodayContributor('fitness')
@@ -57,8 +44,8 @@ export class SandboxMealsToday implements TodayContributor {
   }
 }
 
-/** Five fake domains: two healthy, one throwing, one too slow, one malformed. */
+/** Four fake domains: one healthy, one throwing, one too slow, one malformed. */
 @Module({
-  providers: [SandboxTasksToday, SandboxFitnessToday, SandboxHabitsToday, SandboxFinancesToday, SandboxMealsToday],
+  providers: [SandboxFitnessToday, SandboxHabitsToday, SandboxFinancesToday, SandboxMealsToday],
 })
 export class SandboxTodayModule {}

@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PrismaService } from '../../../src/lib/prisma.js';
 import type { SignalEngineFacade } from '../../../src/signal-engine/signal-engine.facade.js';
 import { bearer, type SentMail, signUpAndVerify, type TestUser, waitForExportReady } from '../helpers.js';
-import { createEngineTestApp, emitBillDue } from './support.js';
+import { createEngineTestApp, emitWorkoutCompleted } from './support.js';
 
 describe('Signal engine: manual overrides, export, account deletion (e2e)', () => {
   let app: INestApplication;
@@ -24,8 +24,8 @@ describe('Signal engine: manual overrides, export, account deletion (e2e)', () =
   });
 
   it('supersedePending marks matching pending suggestions superseded and logs it', async () => {
-    const { payload } = await emitBillDue(facade, user.userId);
-    const targetKey = `sandbox:bill:${payload.billId}`;
+    const { payload } = await emitWorkoutCompleted(facade, user.userId);
+    const targetKey = `sandbox:workout:${payload.workoutId}`;
     const suggestion = await prisma.suggestion.findFirstOrThrow({ where: { targetKey } });
 
     await facade.supersedePending(user.userId, targetKey, 'manual entry took precedence');
@@ -39,16 +39,16 @@ describe('Signal engine: manual overrides, export, account deletion (e2e)', () =
   });
 
   it('recordCorrection logs a manual_override entry linked to the resolved suggestion', async () => {
-    const { payload } = await emitBillDue(facade, user.userId);
-    const targetKey = `sandbox:bill:${payload.billId}`;
+    const { payload } = await emitWorkoutCompleted(facade, user.userId);
+    const targetKey = `sandbox:workout:${payload.workoutId}`;
     const suggestion = await prisma.suggestion.findFirstOrThrow({ where: { targetKey } });
     await request(app.getHttpServer()).post(`/api/v1/inbox/${suggestion.id}/approve`).set(bearer(user.token)).expect(200);
 
     await facade.recordCorrection(user.userId, {
       targetKey,
-      entityRef: { type: 'sandbox-task', id: payload.billId },
-      before: { reminderFor: payload.billId },
-      after: { reminderFor: `${payload.billId}-corrected` },
+      entityRef: { type: 'sandbox-task', id: payload.workoutId },
+      before: { reminderFor: payload.workoutId },
+      after: { reminderFor: `${payload.workoutId}-corrected` },
     });
 
     const activityRes = await request(app.getHttpServer())
@@ -58,11 +58,11 @@ describe('Signal engine: manual overrides, export, account deletion (e2e)', () =
       .expect(200);
     const entry = activityRes.body.items.find((a: { suggestionId: string }) => a.suggestionId === suggestion.id);
     expect(entry).toBeTruthy();
-    expect(entry.after).toEqual({ reminderFor: `${payload.billId}-corrected` });
+    expect(entry.after).toEqual({ reminderFor: `${payload.workoutId}-corrected` });
   });
 
   it('data export includes signals, suggestions, connection settings, and activity log', async () => {
-    await emitBillDue(facade, user.userId);
+    await emitWorkoutCompleted(facade, user.userId);
     await request(app.getHttpServer())
       .patch('/api/v1/connections/workout-to-habit')
       .set(bearer(user.token))
@@ -87,9 +87,9 @@ describe('Signal engine: manual overrides, export, account deletion (e2e)', () =
 
   it('account deletion cascades signals, suggestions, connection settings, and activity log', async () => {
     const doomed = await signUpAndVerify(app, sentMails);
-    await emitBillDue(facade, doomed.userId);
+    await emitWorkoutCompleted(facade, doomed.userId);
     await request(app.getHttpServer())
-      .patch('/api/v1/connections/bill-to-reminder')
+      .patch('/api/v1/connections/workout-to-habit')
       .set(bearer(doomed.token))
       .send({ mode: 'auto' })
       .expect(200);

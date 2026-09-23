@@ -76,3 +76,42 @@ export function compoundCursorWhere(sortField: string, cursor: DecodedCompoundCu
     ],
   };
 }
+
+/**
+ * Same idea as `encodeCompoundCursor`/`decodeCompoundCursor`/`compoundCursorWhere`, for a
+ * `Float`/`Int` sort field (e.g. a manually-reorderable `sortOrder`) instead of a `DateTime`
+ * one - kept separate rather than widening the `Date`-typed functions above, so every
+ * existing caller of those keeps its exact current type-checking.
+ */
+export function encodeNumericCompoundCursor(sortValue: number, id: string): string {
+  return encodeCursor(`${sortValue}|${id}`);
+}
+
+export interface DecodedNumericCompoundCursor {
+  sortValue: number;
+  id: string;
+}
+
+export function decodeNumericCompoundCursor(cursor: string): DecodedNumericCompoundCursor {
+  const raw = decodeCursor(cursor);
+  const separatorIndex = raw.lastIndexOf('|');
+  if (separatorIndex === -1) {
+    throw new BadRequestException('Malformed cursor');
+  }
+  const sortValue = Number(raw.slice(0, separatorIndex));
+  const id = raw.slice(separatorIndex + 1);
+  if (Number.isNaN(sortValue) || !UUID_PATTERN.test(id)) {
+    throw new BadRequestException('Malformed cursor');
+  }
+  return { sortValue, id };
+}
+
+export function numericCompoundCursorWhere(sortField: string, cursor: DecodedNumericCompoundCursor, direction: 'asc' | 'desc' = 'desc') {
+  const op = direction === 'desc' ? 'lt' : 'gt';
+  return {
+    OR: [
+      { [sortField]: { [op]: cursor.sortValue } },
+      { [sortField]: { equals: cursor.sortValue }, id: { [op]: cursor.id } },
+    ],
+  };
+}

@@ -31,11 +31,8 @@ import { buildIcsString, MAX_RRULE_UNTIL_YEARS_AHEAD, type ParsedRRule, parseRRu
  * far-query cost described above, which is a per-step cost, not a step count.
  */
 const POSSIBILITY_CHECK_MAX_ITERATIONS = 500;
-const SERIES_UNTIL_MAX_ITERATIONS = MAX_ITERATIONS_FOR_COUNT_BOUNDED_WALK();
-function MAX_ITERATIONS_FOR_COUNT_BOUNDED_WALK(): number {
-  // A little above MAX_RRULE_COUNT so a fully-packed series never spuriously hits the cap.
-  return 2000;
-}
+/** A little above MAX_RRULE_COUNT so a fully-packed series never spuriously hits the cap. */
+export const SERIES_UNTIL_MAX_ITERATIONS = 2000;
 
 export interface Occurrence {
   /** The occurrence's natural start, before any exception override - the key CalendarEventException rows use. */
@@ -56,7 +53,13 @@ function icsTimezoneFor(event: Pick<CalendarEvent, 'allDay' | 'timezone'>): stri
   return event.allDay ? 'UTC' : event.timezone;
 }
 
-function buildRule(event: Pick<CalendarEvent, 'allDay' | 'timezone' | 'startsAt' | 'rrule'>, maxIterations: number): RRuleTemporal {
+/**
+ * Builds a safety-vetted RRuleTemporal for a `{allDay, timezone, startsAt, rrule}`-shaped
+ * anchor - exported so other domains that reuse this recurrence engine (see Tasks) build
+ * their RRuleTemporal instances the exact same way, with the exact same `maxIterations`
+ * guards, rather than reimplementing the far-query safety analysis above.
+ */
+export function buildRule(event: Pick<CalendarEvent, 'allDay' | 'timezone' | 'startsAt' | 'rrule'>, maxIterations: number): RRuleTemporal {
   if (!event.rrule) throw new Error('buildRule requires a recurring event');
   const parsed = parseRRule(event.rrule);
   const tzid = icsTimezoneFor(event);

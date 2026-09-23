@@ -7,10 +7,14 @@ import {
 } from '../../src/calendar/calendar-block-contributor.js';
 import { sandboxState, sleep } from './sandbox-state.js';
 
-/** Healthy: returns whatever blocks the test has seeded for the user, and records the context it was handed. */
+/**
+ * Healthy: returns whatever blocks the test has seeded for the user, and records the
+ * context it was handed. Uses 'fitness', since the real Tasks module now supplies
+ * @CalendarBlockContributor('tasks').
+ */
 @Injectable()
-@CalendarBlockContributor('tasks')
-export class SandboxTasksBlocks implements CalendarBlockContributorInterface {
+@CalendarBlockContributor('fitness')
+export class SandboxFitnessBlocks implements CalendarBlockContributorInterface {
   async collect(context: CalendarBlockContext): Promise<Block[]> {
     sandboxState.calendarBlockContexts.push(context);
     return sandboxState.calendarBlocksByUser.get(context.userId) ?? [];
@@ -46,7 +50,7 @@ export class SandboxMealsBlocks implements CalendarBlockContributorInterface {
 }
 
 /** One healthy domain only - most specs just need a controllable source of blocks. */
-@Module({ providers: [SandboxTasksBlocks] })
+@Module({ providers: [SandboxFitnessBlocks] })
 export class SandboxCalendarBlockModule {}
 
 /** Adds a throwing, a too-slow and a malformed domain on top of SandboxCalendarBlockModule. */

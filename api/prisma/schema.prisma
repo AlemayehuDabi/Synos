@@ -37,6 +37,10 @@ model User {
 
   calendarEvents CalendarEvent[]
 
+  tasks           Task[]
+  subtasks        Subtask[]
+  taskCompletions TaskCompletion[]
+
   @@unique([email])
   @@map("user")
 }
@@ -519,4 +523,143 @@ model CalendarEventException {
 
   @@unique([eventId, originalStart])
   @@map("calendar_event_exceptions")
+}
+
+// ---------------------------------------------------------------------------
+// Tasks
+// ---------------------------------------------------------------------------
+
+enum TaskStatus {
+  open
+  completed
+  skipped
+}
+
+enum TaskPriority {
+  none
+  low
+  medium
+  high
+}
+
+enum TaskSource {
+  manual
+  suggestion
+  auto
+  sync
+}
+
+enum TaskExceptionKind {
+  skipped
+  modified
+}
+
+enum SubtaskStatus {
+  open
+  completed
+}
+
+/// A task, and the master record of a recurring series when `rrule` is set (the
+/// same one-row-per-series, virtually-expanded model as CalendarEvent - see
+/// TaskException). `recurringGroupId` stays the same across a `scope=following`
+/// split (which, like Calendar's, creates a new master row with its own `id`),
+/// so a series' full history - and the adaptive-estimate rolling average, which
+/// is keyed by it - survives a split; it is null for a non-recurring task, which
+/// uses its own `id` for that instead. `deletedAt` marks a tombstone.
+model Task {
+  id               String       @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  userId           String       @db.Uuid
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title            String
+  notes            String?
+  status           TaskStatus   @default(open)
+  priority         TaskPriority @default(none)
+  dueAt            DateTime?
+  scheduledStart   DateTime?
+  scheduledEnd     DateTime?
+  timezone         String?
+  estimatedMinutes Int?
+  actualMinutes    Int?
+  isCritical       Boolean      @default(false)
+  rrule            String?
+  seriesUntil      DateTime?
+  recurringGroupId String?      @db.Uuid
+  source           TaskSource   @default(manual)
+  sortOrder        Float        @default(0)
+  completedAt      DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  deletedAt        DateTime?
+
+  exceptions  TaskException[]
+  subtasks    Subtask[]
+  completions TaskCompletion[]
+
+  @@index([userId, status, dueAt])
+  @@index([userId, recurringGroupId])
+  @@index([userId, scheduledStart])
+  @@index([deletedAt])
+  @@map("tasks")
+}
+
+/// One changed or skipped occurrence of a recurring task, keyed by the
+/// occurrence's original due date (mirrors CalendarEventException). The override
+/// columns only apply to `modified`; null means "same as the series".
+model TaskException {
+  id               String            @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  taskId           String            @db.Uuid
+  task             Task              @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  originalDueAt    DateTime
+  kind             TaskExceptionKind
+  title            String?
+  notes            String?
+  priority         TaskPriority?
+  dueAt            DateTime?
+  scheduledStart   DateTime?
+  scheduledEnd     DateTime?
+  estimatedMinutes Int?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@unique([taskId, originalDueAt])
+  @@map("task_exceptions")
+}
+
+model Subtask {
+  id        String        @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  taskId    String        @db.Uuid
+  task      Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId    String        @db.Uuid
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  status    SubtaskStatus @default(open)
+  sortOrder Float         @default(0)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  deletedAt DateTime?
+
+  @@index([taskId, sortOrder])
+  @@map("subtasks")
+}
+
+/// One row per task completion (recurring or not), independent of whether the task
+/// itself stays 'open' (rolled forward to its next occurrence) or becomes 'completed'.
+/// Exists so period metrics (completed/missed count, estimate accuracy) have real
+/// history to query even though a recurring task's own row only ever reflects its
+/// current occurrence. Never updated after creation; deleted only by the task's own
+/// cascade.
+model TaskCompletion {
+  id               String    @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  taskId           String    @db.Uuid
+  task             Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId           String    @db.Uuid
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recurringGroupId String?   @db.Uuid
+  dueAt            DateTime?
+  completedAt      DateTime  @default(now())
+  estimatedMinutes Int?
+  actualMinutes    Int?
+
+  @@index([userId, completedAt])
+  @@map("task_completions")
 }

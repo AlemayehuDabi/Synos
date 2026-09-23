@@ -6,7 +6,7 @@ import { PrismaService } from '../../../src/lib/prisma.js';
 import type { SignalEngineFacade } from '../../../src/signal-engine/signal-engine.facade.js';
 import { SandboxApplyOkHandler } from '../../sandbox/sandbox-handlers.js';
 import { bearer, type SentMail, signUpAndVerify, type TestUser } from '../helpers.js';
-import { createEngineTestApp, emitBillDue, findSuggestion } from './support.js';
+import { createEngineTestApp, emitWorkoutCompleted, findSuggestion } from './support.js';
 
 /**
  * The guarantees the spec states in prose rather than as a happy path: no
@@ -35,7 +35,7 @@ describe('Signal engine: guarantees (e2e)', () => {
     autoUser = await signUpAndVerify(app, sentMails);
     pagingUser = await signUpAndVerify(app, sentMails);
     otherUser = await signUpAndVerify(app, sentMails);
-    await http().patch('/api/v1/connections/bill-to-reminder').set(bearer(autoUser.token)).send({ mode: 'auto' }).expect(200);
+    await http().patch('/api/v1/connections/workout-to-habit').set(bearer(autoUser.token)).send({ mode: 'auto' }).expect(200);
   });
 
   afterAll(async () => {
@@ -52,8 +52,8 @@ describe('Signal engine: guarantees (e2e)', () => {
       });
 
     it('manual approve, handler throws: 422, failed, marker rolled back', async () => {
-      const { payload } = await emitBillDue(facade, main.userId, 'throws-');
-      const suggestion = await findSuggestion(app, main.token, payload.billId);
+      const { payload } = await emitWorkoutCompleted(facade, main.userId, 'throws-');
+      const suggestion = await findSuggestion(app, main.token, payload.workoutId);
 
       await http().post(`/api/v1/inbox/${suggestion.id}/approve`).set(bearer(main.token)).expect(422);
 
@@ -63,8 +63,8 @@ describe('Signal engine: guarantees (e2e)', () => {
     });
 
     it('manual approve, handler conflicts: 409, superseded, marker rolled back', async () => {
-      const { payload } = await emitBillDue(facade, main.userId, 'conflict-');
-      const suggestion = await findSuggestion(app, main.token, payload.billId);
+      const { payload } = await emitWorkoutCompleted(facade, main.userId, 'conflict-');
+      const suggestion = await findSuggestion(app, main.token, payload.workoutId);
 
       await http().post(`/api/v1/inbox/${suggestion.id}/approve`).set(bearer(main.token)).expect(409);
 
@@ -74,9 +74,9 @@ describe('Signal engine: guarantees (e2e)', () => {
     });
 
     it('auto mode, handler throws: stays pending with a failureNote, marker rolled back, signal still processed', async () => {
-      const { signal, payload } = await emitBillDue(facade, autoUser.userId, 'throws-');
+      const { signal, payload } = await emitWorkoutCompleted(facade, autoUser.userId, 'throws-');
 
-      const suggestion = await findSuggestion(app, autoUser.token, payload.billId);
+      const suggestion = await findSuggestion(app, autoUser.token, payload.workoutId);
       expect(suggestion.status).toBe('pending');
       expect(suggestion.failureNote).toContain('sandbox handler intentionally threw');
       expect(await leftovers(suggestion.id)).toBe(0);
@@ -85,9 +85,9 @@ describe('Signal engine: guarantees (e2e)', () => {
     });
 
     it('auto mode, handler conflicts: superseded, marker rolled back', async () => {
-      const { payload } = await emitBillDue(facade, autoUser.userId, 'conflict-');
+      const { payload } = await emitWorkoutCompleted(facade, autoUser.userId, 'conflict-');
 
-      const suggestion = await findSuggestion(app, autoUser.token, payload.billId, 'superseded');
+      const suggestion = await findSuggestion(app, autoUser.token, payload.workoutId, 'superseded');
       expect(suggestion).toBeTruthy();
       expect(await leftovers(suggestion.id)).toBe(0);
     });
@@ -95,8 +95,8 @@ describe('Signal engine: guarantees (e2e)', () => {
 
   describe('undo', () => {
     async function approvedActivity(prefix = '') {
-      const { payload } = await emitBillDue(facade, main.userId, prefix);
-      const suggestion = await findSuggestion(app, main.token, payload.billId);
+      const { payload } = await emitWorkoutCompleted(facade, main.userId, prefix);
+      const suggestion = await findSuggestion(app, main.token, payload.workoutId);
       await http().post(`/api/v1/inbox/${suggestion.id}/approve`).set(bearer(main.token)).expect(200);
       const activity = await http()
         .get('/api/v1/activity')
@@ -149,69 +149,69 @@ describe('Signal engine: guarantees (e2e)', () => {
 
   describe('editing a suggestion', () => {
     it('validates params, keeps the first-proposed params in originalParams, and logs each edit', async () => {
-      const { payload } = await emitBillDue(facade, main.userId);
-      const suggestion = await findSuggestion(app, main.token, payload.billId);
+      const { payload } = await emitWorkoutCompleted(facade, main.userId);
+      const suggestion = await findSuggestion(app, main.token, payload.workoutId);
 
       const first = await http()
         .patch(`/api/v1/inbox/${suggestion.id}`)
         .set(bearer(main.token))
-        .send({ params: { billId: 'edited-1' } })
+        .send({ params: { workoutId: 'edited-1' } })
         .expect(200);
-      expect(first.body.params).toEqual({ billId: 'edited-1' });
-      expect(first.body.originalParams).toEqual({ billId: payload.billId });
+      expect(first.body.params).toEqual({ workoutId: 'edited-1' });
+      expect(first.body.originalParams).toEqual({ workoutId: payload.workoutId });
 
       const second = await http()
         .patch(`/api/v1/inbox/${suggestion.id}`)
         .set(bearer(main.token))
-        .send({ params: { billId: 'edited-2' } })
+        .send({ params: { workoutId: 'edited-2' } })
         .expect(200);
-      expect(second.body.params).toEqual({ billId: 'edited-2' });
-      expect(second.body.originalParams).toEqual({ billId: payload.billId }); // not overwritten
+      expect(second.body.params).toEqual({ workoutId: 'edited-2' });
+      expect(second.body.originalParams).toEqual({ workoutId: payload.workoutId }); // not overwritten
       expect(second.body.statusHistory.filter((a: { kind: string }) => a.kind === 'suggestion_edited')).toHaveLength(2);
     });
 
     it('rejects params the handler schema refuses (422) and leaves the suggestion unchanged', async () => {
-      const { payload } = await emitBillDue(facade, main.userId);
-      const suggestion = await findSuggestion(app, main.token, payload.billId);
+      const { payload } = await emitWorkoutCompleted(facade, main.userId);
+      const suggestion = await findSuggestion(app, main.token, payload.workoutId);
 
       await http()
         .patch(`/api/v1/inbox/${suggestion.id}`)
         .set(bearer(main.token))
-        .send({ params: { billId: 5 } })
+        .send({ params: { workoutId: 5 } })
         .expect(422);
       await http().patch(`/api/v1/inbox/${suggestion.id}`).set(bearer(main.token)).send({}).expect(400);
 
       const detail = await http().get(`/api/v1/inbox/${suggestion.id}`).set(bearer(main.token)).expect(200);
-      expect(detail.body.params).toEqual({ billId: payload.billId });
+      expect(detail.body.params).toEqual({ workoutId: payload.workoutId });
       expect(detail.body.originalParams).toBeNull();
     });
 
     it('refuses to edit a suggestion that is no longer pending (409)', async () => {
-      const { payload } = await emitBillDue(facade, main.userId);
-      const suggestion = await findSuggestion(app, main.token, payload.billId);
+      const { payload } = await emitWorkoutCompleted(facade, main.userId);
+      const suggestion = await findSuggestion(app, main.token, payload.workoutId);
       await http().post(`/api/v1/inbox/${suggestion.id}/dismiss`).set(bearer(main.token)).expect(200);
 
       await http()
         .patch(`/api/v1/inbox/${suggestion.id}`)
         .set(bearer(main.token))
-        .send({ params: { billId: 'late-edit' } })
+        .send({ params: { workoutId: 'late-edit' } })
         .expect(409);
     });
 
     it('edit-and-approve in one call applies the edited params and records both steps', async () => {
-      const { payload } = await emitBillDue(facade, main.userId);
-      const suggestion = await findSuggestion(app, main.token, payload.billId);
+      const { payload } = await emitWorkoutCompleted(facade, main.userId);
+      const suggestion = await findSuggestion(app, main.token, payload.workoutId);
 
       const approved = await http()
         .post(`/api/v1/inbox/${suggestion.id}/approve`)
         .set(bearer(main.token))
-        .send({ params: { billId: 'approved-with-edit' } })
+        .send({ params: { workoutId: 'approved-with-edit' } })
         .expect(200);
 
       expect(approved.body.status).toBe('approved');
-      expect(approved.body.params).toEqual({ billId: 'approved-with-edit' });
-      expect(approved.body.originalParams).toEqual({ billId: payload.billId });
-      expect(approved.body.revertData).toEqual({ billId: 'approved-with-edit' });
+      expect(approved.body.params).toEqual({ workoutId: 'approved-with-edit' });
+      expect(approved.body.originalParams).toEqual({ workoutId: payload.workoutId });
+      expect(approved.body.revertData).toEqual({ workoutId: 'approved-with-edit' });
       const kinds = approved.body.statusHistory.map((a: { kind: string }) => a.kind);
       expect(kinds).toEqual(expect.arrayContaining(['suggestion_created', 'suggestion_edited', 'suggestion_approved']));
     });
@@ -221,7 +221,7 @@ describe('Signal engine: guarantees (e2e)', () => {
     beforeAll(async () => {
       for (let i = 0; i < 5; i += 1) {
         // eslint-disable-next-line no-await-in-loop
-        await emitBillDue(facade, pagingUser.userId);
+        await emitWorkoutCompleted(facade, pagingUser.userId);
       }
     });
 
@@ -245,7 +245,7 @@ describe('Signal engine: guarantees (e2e)', () => {
     }
 
     it.each([
-      ['/api/v1/signals', { type: 'bill.due' }],
+      ['/api/v1/signals', { type: 'workout.completed' }],
       ['/api/v1/inbox', { status: 'pending' }],
       ['/api/v1/activity', { kind: 'suggestion_created' }],
     ])('%s: pages cover every row exactly once, in the same order as one big page', async (path, query) => {
@@ -295,11 +295,11 @@ describe('Signal engine: guarantees (e2e)', () => {
 
   describe('owner scoping on every route', () => {
     it("another user sees none of a user's data and cannot act on it or change their settings", async () => {
-      const first = await emitBillDue(facade, main.userId);
-      const second = await emitBillDue(facade, main.userId);
+      const first = await emitWorkoutCompleted(facade, main.userId);
+      const second = await emitWorkoutCompleted(facade, main.userId);
       const idsOfMain = [
-        (await findSuggestion(app, main.token, first.payload.billId)).id,
-        (await findSuggestion(app, main.token, second.payload.billId)).id,
+        (await findSuggestion(app, main.token, first.payload.workoutId)).id,
+        (await findSuggestion(app, main.token, second.payload.workoutId)).id,
       ];
 
       // lists and the badge count are scoped
@@ -327,18 +327,18 @@ describe('Signal engine: guarantees (e2e)', () => {
       }
 
       // connection modes are per-user
-      await http().patch('/api/v1/connections/bill-to-reminder').set(bearer(otherUser.token)).send({ mode: 'off' }).expect(200);
+      await http().patch('/api/v1/connections/workout-to-habit').set(bearer(otherUser.token)).send({ mode: 'off' }).expect(200);
       const mine = await http().get('/api/v1/connections').set(bearer(main.token)).expect(200);
-      expect(mine.body.find((c: { id: string }) => c.id === 'bill-to-reminder').mode).toBe('suggest');
+      expect(mine.body.find((c: { id: string }) => c.id === 'workout-to-habit').mode).toBe('suggest');
       const theirs = await http().get('/api/v1/connections').set(bearer(otherUser.token)).expect(200);
-      expect(theirs.body.find((c: { id: string }) => c.id === 'bill-to-reminder').mode).toBe('off');
+      expect(theirs.body.find((c: { id: string }) => c.id === 'workout-to-habit').mode).toBe('off');
     });
   });
 
   describe('Idempotency-Key on the action routes', () => {
     it('replaying an approve with the same key returns the first response instead of a 409', async () => {
-      const { payload } = await emitBillDue(facade, main.userId);
-      const suggestion = await findSuggestion(app, main.token, payload.billId);
+      const { payload } = await emitWorkoutCompleted(facade, main.userId);
+      const suggestion = await findSuggestion(app, main.token, payload.workoutId);
       const key = `key-${randomUUID()}`;
 
       const first = await http()
@@ -400,10 +400,10 @@ describe('Signal engine: guarantees (e2e)', () => {
     });
 
     it('refuses (422) to reuse a key for a different suggestion', async () => {
-      const a = await emitBillDue(facade, main.userId);
-      const b = await emitBillDue(facade, main.userId);
-      const suggestionA = await findSuggestion(app, main.token, a.payload.billId);
-      const suggestionB = await findSuggestion(app, main.token, b.payload.billId);
+      const a = await emitWorkoutCompleted(facade, main.userId);
+      const b = await emitWorkoutCompleted(facade, main.userId);
+      const suggestionA = await findSuggestion(app, main.token, a.payload.workoutId);
+      const suggestionB = await findSuggestion(app, main.token, b.payload.workoutId);
       const key = `reuse-${randomUUID()}`;
 
       await http().post(`/api/v1/inbox/${suggestionA.id}/approve`).set(bearer(main.token)).set('Idempotency-Key', key).expect(200);
@@ -416,14 +416,14 @@ describe('Signal engine: guarantees (e2e)', () => {
 
   describe('signals are append-only', () => {
     it("rejects changes to a signal's content but allows processing bookkeeping and deletion", async () => {
-      const { signal } = await emitBillDue(facade, main.userId);
+      const { signal } = await emitWorkoutCompleted(facade, main.userId);
 
       await expect(prisma.signal.update({ where: { id: signal.id }, data: { type: 'meal.logged' } })).rejects.toThrow();
       await expect(
         prisma.$executeRawUnsafe(`UPDATE signals SET payload = '{}'::jsonb WHERE id = '${signal.id}'::uuid`),
       ).rejects.toThrow(/append-only/);
       const untouched = await prisma.signal.findUniqueOrThrow({ where: { id: signal.id } });
-      expect(untouched.type).toBe('bill.due');
+      expect(untouched.type).toBe('workout.completed');
       expect(untouched.payload).toEqual(signal.payload);
 
       await expect(

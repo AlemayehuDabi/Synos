@@ -7,51 +7,53 @@ import {
   SANDBOX_ACTION_THROWS,
 } from './sandbox-handlers.js';
 
-interface BillDuePayload {
-  billId: string;
-  dueDate: string;
-  amountCents: number;
-  currency: string;
-  daysUntilDue: number;
+interface WorkoutCompletedPayload {
+  workoutId: string;
+  completedAt: string;
+  durationMinutes: number;
+  workoutType: string;
 }
 
 /**
- * Stands in for the real "bill-to-reminder" rule a future finances/tasks
+ * Stands in for the real "workout-to-habit" rule a future fitness/habits
  * domain would provide. Which fake action type it proposes is picked from a
- * prefix on billId, so e2e tests can drive every handler outcome (success,
- * non-revertible, throw, conflict) through the real "bill.due" signal without
- * needing a fake connection (connections are fixed - see catalog/connections.ts).
+ * prefix on workoutId, so e2e tests can drive every handler outcome (success,
+ * non-revertible, throw, conflict) through the real "workout.completed" signal
+ * without needing a fake connection (connections are fixed - see
+ * catalog/connections.ts). Was "bill-to-reminder" until the Tasks module
+ * supplied a real rule for that connection; moved here, the one connection
+ * still fully unimplemented (fitness and habits do not exist yet either).
  */
 @Injectable()
-@ConnectionRule('bill-to-reminder')
-export class SandboxBillRule implements ConnectionRule {
+@ConnectionRule('workout-to-habit')
+export class SandboxWorkoutRule implements ConnectionRule {
   async evaluate(ctx: RuleContext): Promise<ProposalDraft[]> {
-    const payload = ctx.signal.payload as BillDuePayload;
+    const payload = ctx.signal.payload as WorkoutCompletedPayload;
 
     // Simulates a rule-level failure (as opposed to a handler-level one), the
     // kind the sweeper's retry/backoff and max-attempts logic exists for.
-    if (payload.billId.startsWith('rule-throws-')) {
+    if (payload.workoutId.startsWith('rule-throws-')) {
       throw new Error('sandbox rule intentionally threw');
     }
 
-    const actionType = pickActionType(payload.billId);
+    const actionType = pickActionType(payload.workoutId);
 
     return [
       {
-        title: `Reminder: bill ${payload.billId} due ${payload.dueDate}`,
-        body: `Sandbox-generated reminder for testing (${payload.amountCents} ${payload.currency}).`,
+        title: `Log habit for workout ${payload.workoutId}`,
+        body: `Sandbox-generated reminder for testing (${payload.durationMinutes} min ${payload.workoutType}).`,
         actionType,
-        params: { billId: payload.billId },
-        targetKey: `sandbox:bill:${payload.billId}`,
+        params: { workoutId: payload.workoutId },
+        targetKey: `sandbox:workout:${payload.workoutId}`,
         dedupeKey: `${ctx.signal.id}:${actionType}`,
       },
     ];
   }
 }
 
-function pickActionType(billId: string): string {
-  if (billId.startsWith('conflict-')) return SANDBOX_ACTION_CONFLICT;
-  if (billId.startsWith('throws-')) return SANDBOX_ACTION_THROWS;
-  if (billId.startsWith('norevert-')) return SANDBOX_ACTION_NON_REVERTIBLE;
+function pickActionType(workoutId: string): string {
+  if (workoutId.startsWith('conflict-')) return SANDBOX_ACTION_CONFLICT;
+  if (workoutId.startsWith('throws-')) return SANDBOX_ACTION_THROWS;
+  if (workoutId.startsWith('norevert-')) return SANDBOX_ACTION_NON_REVERTIBLE;
   return SANDBOX_ACTION_APPLY;
 }

@@ -6,10 +6,14 @@ import {
 } from '../../src/reviews/review-contributor.js';
 import { sandboxState, sleep } from './sandbox-state.js';
 
-/** Healthy: reports the user's completed tasks, and records the context it was handed. */
+/**
+ * Healthy: reports a configurable completed count, and records the context it was
+ * handed. Uses 'fitness', since the real Calendar and Tasks modules now supply
+ * @ReviewContributor('calendar')/@ReviewContributor('tasks').
+ */
 @Injectable()
-@ReviewContributor('tasks')
-export class SandboxTasksReview implements ReviewContributor {
+@ReviewContributor('fitness')
+export class SandboxFitnessReview implements ReviewContributor {
   async collect(context: ReviewContext): Promise<ReviewContribution> {
     sandboxState.reviewContexts.push(context);
     const completed = sandboxState.tasksByUser.get(context.userId) ?? 0;
@@ -40,7 +44,7 @@ export class SandboxFinancesReview implements ReviewContributor {
 }
 
 /** One healthy domain. */
-@Module({ providers: [SandboxTasksReview] })
+@Module({ providers: [SandboxFitnessReview] })
 export class SandboxReviewModule {}
 
 /** Adds a throwing and a too-slow domain on top of SandboxReviewModule. */

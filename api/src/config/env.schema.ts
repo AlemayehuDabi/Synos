@@ -44,6 +44,10 @@ export const envSchema = z.object({
   CALENDAR_CONTRIBUTOR_TIMEOUT_MS: z.coerce.number().int().positive().default(1500),
   CALENDAR_MAX_OCCURRENCES_PER_QUERY: z.coerce.number().int().positive().max(50_000).default(2000),
   CALENDAR_TOMBSTONE_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
+
+  TASKS_TOMBSTONE_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
+  TASKS_PATTERN_MIN_OCCURRENCES: z.coerce.number().int().positive().default(3),
+  TASKS_PATTERN_WINDOW_DAYS: z.coerce.number().int().positive().default(60),
 });
 
 export type Env = z.infer<typeof envSchema>;

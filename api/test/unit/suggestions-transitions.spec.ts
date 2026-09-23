@@ -301,9 +301,20 @@ describe('SuggestionsService transitions', () => {
       await expect(service.undoActivity('u1', 'a1')).rejects.toMatchObject({ status: 422 });
     });
 
-    it('answers 422 for a suggestion that is not approved or auto-applied', async () => {
-      setup({ suggestion: { status: 'reverted' } });
-      await expect(service.undoActivity('u1', 'a1')).rejects.toMatchObject({ status: 422 });
+    it.each([['pending'], ['dismissed'], ['expired'], ['superseded'], ['failed']])(
+      'answers 422 for a suggestion that was never approved or auto-applied (%s)',
+      async (status) => {
+        setup({ suggestion: { status } });
+        await expect(service.undoActivity('u1', 'a1')).rejects.toMatchObject({ status: 422 });
+      },
+    );
+
+    it('answers 409, not 422, for a suggestion already reverted - this read is outside the transaction, so a concurrent undo can flip status to \'reverted\' here; rejecting it as 422 ("never a valid target") would misreport that race instead of letting the CAS below report the correct 409', async () => {
+      const { revert } = setup({ suggestion: { status: 'reverted' } });
+      tx.suggestion.updateMany.mockResolvedValue({ count: 0 }); // the CAS itself correctly finds no matching row to claim
+
+      await expect(service.undoActivity('u1', 'a1')).rejects.toMatchObject({ status: 409 });
+      expect(revert).not.toHaveBeenCalled();
     });
   });
 

@@ -12,7 +12,7 @@ export const SANDBOX_ACTION_NON_REVERTIBLE = 'sandbox.apply-non-revertible';
 export const SANDBOX_ACTION_THROWS = 'sandbox.apply-throws';
 export const SANDBOX_ACTION_CONFLICT = 'sandbox.apply-conflict';
 
-const paramsSchema = z.object({ billId: z.string().min(1) });
+const paramsSchema = z.object({ workoutId: z.string().min(1) });
 type Params = z.infer<typeof paramsSchema>;
 
 /**
@@ -32,17 +32,17 @@ async function writePartialWrite(ctx: ActionHandlerContext): Promise<void> {
 @ActionHandler(SANDBOX_ACTION_APPLY)
 export class SandboxApplyOkHandler implements ActionHandler<Params> {
   readonly actionType = SANDBOX_ACTION_APPLY;
-  readonly targetDomain = 'tasks';
+  readonly targetDomain = 'habits';
   readonly paramsSchema = paramsSchema;
   readonly supportsRevert = true;
 
   async apply(_ctx: ActionHandlerContext, params: Params): Promise<ApplyResult> {
     return {
       outcome: 'applied',
-      entityRef: { type: 'sandbox-task', id: params.billId },
+      entityRef: { type: 'sandbox-task', id: params.workoutId },
       before: null,
-      after: { reminderFor: params.billId },
-      revertData: { billId: params.billId },
+      after: { reminderFor: params.workoutId },
+      revertData: { workoutId: params.workoutId },
     };
   }
 
@@ -56,15 +56,15 @@ export class SandboxApplyOkHandler implements ActionHandler<Params> {
 @ActionHandler(SANDBOX_ACTION_NON_REVERTIBLE)
 export class SandboxNonRevertibleHandler implements ActionHandler<Params> {
   readonly actionType = SANDBOX_ACTION_NON_REVERTIBLE;
-  readonly targetDomain = 'tasks';
+  readonly targetDomain = 'habits';
   readonly paramsSchema = paramsSchema;
   readonly supportsRevert = false;
 
   async apply(_ctx: ActionHandlerContext, params: Params): Promise<ApplyResult> {
     return {
       outcome: 'applied',
-      entityRef: { type: 'sandbox-task', id: params.billId },
-      after: { reminderFor: params.billId },
+      entityRef: { type: 'sandbox-task', id: params.workoutId },
+      after: { reminderFor: params.workoutId },
     };
   }
 }
@@ -74,7 +74,7 @@ export class SandboxNonRevertibleHandler implements ActionHandler<Params> {
 @ActionHandler(SANDBOX_ACTION_THROWS)
 export class SandboxThrowsHandler implements ActionHandler<Params> {
   readonly actionType = SANDBOX_ACTION_THROWS;
-  readonly targetDomain = 'tasks';
+  readonly targetDomain = 'habits';
   readonly paramsSchema = paramsSchema;
   readonly supportsRevert = false;
 
@@ -89,7 +89,7 @@ export class SandboxThrowsHandler implements ActionHandler<Params> {
 @ActionHandler(SANDBOX_ACTION_CONFLICT)
 export class SandboxConflictHandler implements ActionHandler<Params> {
   readonly actionType = SANDBOX_ACTION_CONFLICT;
-  readonly targetDomain = 'tasks';
+  readonly targetDomain = 'habits';
   readonly paramsSchema = paramsSchema;
   readonly supportsRevert = false;
 

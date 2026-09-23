@@ -547,7 +547,12 @@ export class SuggestionsService {
 
     const suggestion = await this.prisma.suggestion.findFirst({ where: { id: activity.suggestionId, userId } });
     if (!suggestion) throw new NotFoundException('Suggestion not found');
-    if (suggestion.status !== 'approved' && suggestion.status !== 'auto_applied') {
+    // 'reverted' is deliberately not rejected here even though it isn't a valid undo source
+    // state either: this read is outside the transaction below, so a concurrent undo can flip
+    // status to 'reverted' between this check and the CAS inside it. Rejecting it here would
+    // misreport that race as 422 ("never a valid target") instead of letting the CAS's own
+    // claim fail and report the correct 409 ("someone already undid this").
+    if (suggestion.status !== 'approved' && suggestion.status !== 'auto_applied' && suggestion.status !== 'reverted') {
       throw new UnprocessableEntityException('Only approved or auto-applied suggestions can be undone');
     }
 

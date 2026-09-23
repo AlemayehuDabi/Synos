@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   compoundCursorWhere,
   decodeCompoundCursor,
+  decodeNumericCompoundCursor,
   DEFAULT_PAGE_SIZE,
   encodeCompoundCursor,
+  encodeNumericCompoundCursor,
   MAX_PAGE_SIZE,
+  numericCompoundCursorWhere,
   resolvePageSize,
 } from '../../src/common/pagination/cursor-pagination.js';
 
@@ -50,6 +53,42 @@ describe('compoundCursorWhere', () => {
   it('is "strictly after" for ascending pagination', () => {
     expect(compoundCursorWhere('startsAt', cursor, 'asc')).toEqual({
       OR: [{ startsAt: { gt: cursor.sortValue } }, { startsAt: { equals: cursor.sortValue }, id: { gt: cursor.id } }],
+    });
+  });
+});
+
+describe('encodeNumericCompoundCursor / decodeNumericCompoundCursor', () => {
+  it('round-trips a (sortValue, id) pair', () => {
+    const decoded = decodeNumericCompoundCursor(encodeNumericCompoundCursor(3.5, '2a3b4c5d-0000-4000-8000-000000000000'));
+    expect(decoded).toEqual({ sortValue: 3.5, id: '2a3b4c5d-0000-4000-8000-000000000000' });
+  });
+
+  it('round-trips zero and negative values', () => {
+    expect(decodeNumericCompoundCursor(encodeNumericCompoundCursor(0, '2a3b4c5d-0000-4000-8000-000000000000')).sortValue).toBe(0);
+    expect(decodeNumericCompoundCursor(encodeNumericCompoundCursor(-12.25, '2a3b4c5d-0000-4000-8000-000000000000')).sortValue).toBe(-12.25);
+  });
+
+  it('rejects a malformed cursor', () => {
+    expect(() => decodeNumericCompoundCursor('not-base64url-cursor-data')).toThrow('Malformed cursor');
+    expect(() => decodeNumericCompoundCursor(Buffer.from('no-separator').toString('base64url'))).toThrow('Malformed cursor');
+    expect(() => decodeNumericCompoundCursor(Buffer.from('not-a-number|2a3b4c5d-0000-4000-8000-000000000000').toString('base64url'))).toThrow('Malformed cursor');
+    expect(() => decodeNumericCompoundCursor(Buffer.from('3.5|not-a-uuid').toString('base64url'))).toThrow('Malformed cursor');
+  });
+});
+
+describe('numericCompoundCursorWhere', () => {
+  const cursor = { sortValue: 3.5, id: '2a3b4c5d-0000-4000-8000-000000000000' };
+
+  it('defaults to "strictly before" (descending pagination)', () => {
+    expect(numericCompoundCursorWhere('sortOrder', cursor)).toEqual({
+      OR: [{ sortOrder: { lt: cursor.sortValue } }, { sortOrder: { equals: cursor.sortValue }, id: { lt: cursor.id } }],
+    });
+    expect(numericCompoundCursorWhere('sortOrder', cursor, 'desc')).toEqual(numericCompoundCursorWhere('sortOrder', cursor));
+  });
+
+  it('is "strictly after" for ascending pagination', () => {
+    expect(numericCompoundCursorWhere('sortOrder', cursor, 'asc')).toEqual({
+      OR: [{ sortOrder: { gt: cursor.sortValue } }, { sortOrder: { equals: cursor.sortValue }, id: { gt: cursor.id } }],
     });
   });
 });

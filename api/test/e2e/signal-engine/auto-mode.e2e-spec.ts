@@ -2,7 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { bearer, type SentMail, signUpAndVerify, type TestUser } from '../helpers.js';
-import { createEngineTestApp, emitBillDue } from './support.js';
+import { createEngineTestApp, emitWorkoutCompleted } from './support.js';
 import type { SignalEngineFacade } from '../../../src/signal-engine/signal-engine.facade.js';
 
 describe('Signal engine: auto mode (e2e)', () => {
@@ -15,7 +15,7 @@ describe('Signal engine: auto mode (e2e)', () => {
     ({ app, sentMails, facade } = await createEngineTestApp());
     user = await signUpAndVerify(app, sentMails);
     await request(app.getHttpServer())
-      .patch('/api/v1/connections/bill-to-reminder')
+      .patch('/api/v1/connections/workout-to-habit')
       .set(bearer(user.token))
       .send({ mode: 'auto' })
       .expect(200);
@@ -26,17 +26,17 @@ describe('Signal engine: auto mode (e2e)', () => {
   });
 
   it('applies immediately with revert data recorded', async () => {
-    const { payload } = await emitBillDue(facade, user.userId);
+    const { payload } = await emitWorkoutCompleted(facade, user.userId);
 
     const inboxRes = await request(app.getHttpServer())
       .get('/api/v1/inbox')
       .query({ status: 'auto_applied' })
       .set(bearer(user.token))
       .expect(200);
-    const item = inboxRes.body.items.find((s: { targetKey: string }) => s.targetKey === `sandbox:bill:${payload.billId}`);
+    const item = inboxRes.body.items.find((s: { targetKey: string }) => s.targetKey === `sandbox:workout:${payload.workoutId}`);
     expect(item).toBeTruthy();
     expect(item.status).toBe('auto_applied');
-    expect(item.revertData).toEqual({ billId: payload.billId });
+    expect(item.revertData).toEqual({ workoutId: payload.workoutId });
 
     const activityRes = await request(app.getHttpServer())
       .get('/api/v1/activity')
@@ -54,27 +54,27 @@ describe('Signal engine: auto mode (e2e)', () => {
   });
 
   it('supersedes when the handler reports a conflict', async () => {
-    const { payload } = await emitBillDue(facade, user.userId, 'conflict-');
+    const { payload } = await emitWorkoutCompleted(facade, user.userId, 'conflict-');
 
     const inboxRes = await request(app.getHttpServer())
       .get('/api/v1/inbox')
       .query({ status: 'superseded' })
       .set(bearer(user.token))
       .expect(200);
-    const item = inboxRes.body.items.find((s: { targetKey: string }) => s.targetKey === `sandbox:bill:${payload.billId}`);
+    const item = inboxRes.body.items.find((s: { targetKey: string }) => s.targetKey === `sandbox:workout:${payload.workoutId}`);
     expect(item).toBeTruthy();
     expect(item.status).toBe('superseded');
   });
 
   it('gracefully downgrades to a plain pending suggestion when the handler throws', async () => {
-    const { payload } = await emitBillDue(facade, user.userId, 'throws-');
+    const { payload } = await emitWorkoutCompleted(facade, user.userId, 'throws-');
 
     const inboxRes = await request(app.getHttpServer())
       .get('/api/v1/inbox')
       .query({ status: 'pending' })
       .set(bearer(user.token))
       .expect(200);
-    const item = inboxRes.body.items.find((s: { targetKey: string }) => s.targetKey === `sandbox:bill:${payload.billId}`);
+    const item = inboxRes.body.items.find((s: { targetKey: string }) => s.targetKey === `sandbox:workout:${payload.workoutId}`);
     expect(item).toBeTruthy();
     expect(item.status).toBe('pending');
     expect(item.failureNote).toContain('sandbox handler intentionally threw');

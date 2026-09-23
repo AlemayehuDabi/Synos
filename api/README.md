@@ -1,14 +1,21 @@
 # Synos API
 
-The NestJS backend for Synos. Two things live here so far:
+The NestJS backend for Synos. What lives here so far:
 
 - **Auth & account management**: sign-up/sign-in, sessions, profile, settings,
   privacy, devices, data export, and account deletion.
-- **Signal engine**: the cross-domain automation layer domain modules (tasks,
-  habits, fitness, finances, meals, calendar) will plug into once they exist.
-  See [Signal engine](#signal-engine) below.
+- **Signal engine**: the cross-domain automation layer domain modules plug
+  into. See [Signal engine](#signal-engine) below.
+- **Today, reviews and notifications**: cross-domain daily/weekly/monthly
+  summaries and the inbox/push layer. See
+  [Today, reviews and notifications](#today-reviews-and-notifications).
+- **Calendar**: hard events, recurrence, and soft blocks from other domains.
+  See [Calendar](#calendar).
+- **Tasks**: quick-capture and recurring tasks, subtasks, and the bill-to-
+  reminder/recovery-to-task-load connections. See [Tasks](#tasks).
 
-No domain features themselves live here yet.
+Habits, Fitness, Finances and Meals don't exist yet; the signal engine's
+connection catalog and domain enums already have room for them.
 
 ## Stack
 
@@ -488,9 +495,11 @@ here's what was chosen and why:
 Three modules that sit on top of the domains (tasks, habits, fitness, finances,
 meals, calendar) without knowing any of them. `GET /today` and the weekly/monthly
 reviews are assembled from **contributors** that each domain declares; a domain
-tells the user something through **`NotificationsFacade`**. The domain modules
-don't exist yet, so everything here is exercised by test-only fakes under
-`test/sandbox/`, never by code in `src/`.
+tells the user something through **`NotificationsFacade`**. Calendar and Tasks
+register real contributors (`@TodayContributor`, `@ReviewContributor`, and, for
+Calendar/Tasks specifically, `@CalendarBlockContributor`); Habits, Fitness,
+Finances and Meals don't exist yet, so their sections are exercised by
+test-only fakes under `test/sandbox/`, never by code in `src/`.
 
 | Route | What it does |
 | --- | --- |
@@ -842,6 +851,119 @@ API ever asks the engine for a target outside that window: `view`/`free-slots` a
 bounded by the horizon above, and writing an event only ever searches at (or a
 bounded walk from) its own `DTSTART`, which stays fast regardless of how far that
 `DTSTART` itself is from today.
+
+## Tasks
+
+Tasks owns `Task`/`TaskException`/`Subtask`. It never writes into another
+domain's data — it only emits signals (via `SignalEngineFacade`) and exposes its
+own *scheduled* tasks to Calendar, read-only, as soft blocks
+(`@CalendarBlockContributor('tasks')`); an unscheduled task is never a block. It
+also registers `@TodayContributor('tasks')` (due-today/overdue/scheduled-today)
+and `@ReviewContributor('tasks')` (completed/missed/completion rate/estimate
+accuracy for the period) — see
+[Today, reviews and notifications](#today-reviews-and-notifications).
+
+| Route | What it does |
+| --- | --- |
+| `GET /api/v1/tasks?status&priority&dueBefore&dueAfter&recurringGroupId&unscheduled&cursor&limit` | Cursor-paginated, ascending by the caller's own `sortOrder` |
+| `POST /api/v1/tasks` | Create (accepts `Idempotency-Key`); quick capture — only `title` is required |
+| `GET/PATCH/DELETE /api/v1/tasks/:id` | PATCH/DELETE take `scope` and `occurrenceStart` for a recurring task |
+| `POST /api/v1/tasks/:id/complete` | Body `{ actualMinutes? }` (accepts `Idempotency-Key`) — see "Completing a recurring task" below |
+| `POST /api/v1/tasks/:id/reopen` | Sets a completed task back to `open` |
+| `POST /api/v1/tasks/:id/skip` | Skips one occurrence (creates a `skipped` exception); defaults to the current occurrence, which also rolls it forward |
+| `PUT /api/v1/tasks/:id/recurrence` | Changes or removes `rrule`; same `scope` semantics as PATCH |
+| `POST /api/v1/tasks/:id/schedule` | Body `{ scheduledStart, scheduledEnd, timezone? }`; clearing is `scheduledStart: null` (accepts `Idempotency-Key`) |
+| `GET/POST /api/v1/tasks/:id/subtasks` | POST accepts `Idempotency-Key` |
+| `PATCH/DELETE /api/v1/tasks/:id/subtasks/:subtaskId` | |
+| `POST /api/v1/tasks/reorder` | Body `{ orderedIds: uuid[] }`; recomputes `sortOrder` to match |
+
+Owner-scoped, validated, documented in OpenAPI (`/docs`), standard error shape.
+A client may supply a task's `id`; creating one that already exists is a 409.
+
+### Recurrence and the rolling-occurrence model
+
+`rrule` reuses Calendar's own recurrence engine and RRULE subset unchanged (see
+[Events, all-day and recurrence](#events-all-day-and-recurrence)) — same
+frequencies, `BYDAY`/`BYMONTHDAY`/`BYMONTH`/`BYSETPOS`/`WKST`, `COUNT`/`UNTIL`,
+and the same rejection of an impossible rule. `rrule` requires `dueAt` (the
+series' own `DTSTART`); `timezone` defaults to the caller's own and is what
+recurrence is expanded in.
+
+Unlike a Calendar event, a recurring task's `dueAt` is a **mutable pointer to
+its current occurrence**, not an immutable series start: completing or skipping
+the current occurrence advances `dueAt` (and, if set, `scheduledStart`/
+`scheduledEnd`, preserving their wall-clock offset and duration) to the next
+occurrence in place, and the task stays `open`. Once the series is exhausted
+(past `seriesUntil`, or the rule itself produces no more occurrences), the task
+becomes `completed` instead of rolling forward. A **future** occurrence is still
+edited exactly like Calendar's — `scope` (`this` | `following` | `all`, default
+`all`) with `occurrenceStart` (that occurrence's unmodified due date) for
+`this`/`following`:
+
+- **`this`** creates or updates a `TaskException` for just that occurrence.
+  PATCH/skip return the occurrence, not the task.
+- **`following`** truncates the series and creates a new one (sharing the
+  original's `recurringGroupId`, so its adaptive-estimate history and Review
+  history carry forward) from the split point onward, carrying the change;
+  exceptions at or after the split move over if the (possibly changed) pattern
+  still produces them, and are dropped otherwise.
+- **`all`** updates the master directly and remaps exceptions the same way.
+
+If a `this`/`following` exception is already waiting at the occurrence a
+roll-forward lands on, it is absorbed into the master (a `skipped` one is
+skipped over to the next occurrence instead) rather than applied twice.
+
+### Adaptive estimate
+
+On `complete`, an `actualMinutes` given in the body updates a rolling estimate
+(exponential moving average, α = 0.3 — a single unusually long/short run never
+fully overwrites it) and stores it back as `estimatedMinutes` directly on the
+task's own record, since it is the task's own historical data, not a
+cross-domain effect. This is keyed by whatever row persists the series'
+history: the same task row across roll-forwards for a recurring task (carried
+to a new master on a `following` split via `recurringGroupId`), or the same row
+across reopen/complete cycles for a non-recurring one. A `TaskCompletion` row is
+also written on every completion (independent of whether the task's own row
+stays `open` or becomes `completed`), since a recurring task's master only ever
+reflects its current occurrence — Review's completed/missed/estimate-accuracy
+metrics for a past period read from this history instead.
+
+### Signals emitted
+
+| Signal | When | Notes |
+| --- | --- | --- |
+| `task.missed` | An open task's `dueAt` passes | `@SignalDetector('tasks-missed')`, every 15 minutes, advisory-lock guarded. Deduped by task id + exact `dueAt`, so a roll-forward/skip (which changes `dueAt`) is free to emit again, but an unchanged overdue task never double-emits |
+| `task.recurring_pattern` | The same (non-recurring) task title is created `TASKS_PATTERN_MIN_OCCURRENCES`+ times within `TASKS_PATTERN_WINDOW_DAYS` | `@SignalDetector('tasks-recurring-pattern')`, daily. Does not re-fire for the same fingerprint while a suggestion for it is still `pending`/`dismissed` within the window (checked directly against `Suggestion`, independent of the signal's own per-day dedupe) |
+
+### Connections handled
+
+Tasks supplies both the rule and the action handler for two catalog
+connections (see [Signal engine](#signal-engine)):
+
+- **`bill-to-reminder`** (`bill.due` → tasks): creates a reminder task from the
+  bill's due date/amount. Revert deletes it if it was never touched since
+  creation, otherwise conflicts.
+- **`recovery-to-task-load`** (`sleep.poor`/`training.heavy` → tasks): softens
+  today's load — pushes `scheduledStart`/`scheduledEnd` back and trims
+  `estimatedMinutes` — for each non-critical open task due or scheduled today,
+  one proposal per task; a task with `isCritical: true` is never proposed for
+  or touched. Revert restores the prior values, or conflicts if the task has
+  since changed. A manual write to `scheduledStart`/`scheduledEnd`/
+  `estimatedMinutes` on a task (via PATCH or `/schedule`) supersedes that
+  task's own still-pending suggestion and records a correction — manual edits
+  are ground truth, per-task rather than per-day.
+
+`recurring-task-to-habit` (`task.recurring_pattern` → habits) is in the fixed
+connection catalog for a future Habits module to supply the rule/handler for;
+Tasks only emits the signal.
+
+### Environment variables
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `TASKS_TOMBSTONE_RETENTION_DAYS` | `90` | Deleted tasks are hard-deleted (cascading their exceptions/subtasks) this many days after deletion |
+| `TASKS_PATTERN_MIN_OCCURRENCES` | `3` | How many same-title task creations within the window trigger `task.recurring_pattern` |
+| `TASKS_PATTERN_WINDOW_DAYS` | `60` | Lookback window for the recurring-pattern detector |
 
 ## Local Postgres without Docker
 

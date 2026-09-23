@@ -125,19 +125,27 @@ describe('Reviews (e2e)', () => {
 
     it('has one section per registered domain, then the cross-domain one, and a bad domain never fails the review', async () => {
       const [weekly] = (await listReviews(userA).expect(200)).body.items;
-      // 'calendar' comes first (canonical SignalDomain order) and is the real Calendar
-      // module's own @ReviewContributor('calendar'); this user has no calendar events.
+      // 'calendar' and 'tasks' (canonical SignalDomain order) are the real Calendar and
+      // Tasks modules' own contributors; this user has no calendar events or tasks - see
+      // the Tasks e2e suite for real @ReviewContributor('tasks') behavior.
       expect(weekly.sections.map((s: { domain: string; status: string }) => `${s.domain}:${s.status}`)).toEqual([
         'calendar:ok',
         'tasks:ok',
         'habits:error',
+        'fitness:ok', // the sandbox fixture with a configurable completed count
         'finances:timeout',
         'cross_domain:ok',
       ]);
       expect(weekly.sections[0]).toEqual({ domain: 'calendar', status: 'ok', metrics: { eventsCount: 0, scheduledHours: 0 }, highlights: [] });
-      expect(weekly.sections[1]).toEqual({ domain: 'tasks', status: 'ok', metrics: { completed: 0 }, highlights: [] });
+      expect(weekly.sections[1]).toEqual({
+        domain: 'tasks',
+        status: 'ok',
+        metrics: { completed: 0, missed: 0, completionRate: 0, avgEstimateAccuracy: null },
+        highlights: [],
+      });
       expect(weekly.sections[2]).toEqual({ domain: 'habits', status: 'error' });
-      expect(weekly.sections[3]).toEqual({ domain: 'finances', status: 'timeout' });
+      expect(weekly.sections[3]).toEqual({ domain: 'fitness', status: 'ok', metrics: { completed: 0 }, highlights: [] });
+      expect(weekly.sections[4]).toEqual({ domain: 'finances', status: 'timeout' });
       expect(JSON.stringify(weekly)).not.toContain('SECRET-HABIT-PAYLOAD');
     });
 

@@ -7,7 +7,7 @@ import { SandboxModule } from '../../sandbox/sandbox.module.js';
 import { sandboxState } from '../../sandbox/sandbox-state.js';
 import { SandboxTodayModule } from '../../sandbox/today-contributors.js';
 import { bearer, createTestApp, type SentMail, signUpAndVerify, type TestUser, updateSettings } from '../helpers.js';
-import { emitBillDue } from '../signal-engine/support.js';
+import { emitWorkoutCompleted } from '../signal-engine/support.js';
 import { SignalEngineFacade } from '../../../src/signal-engine/signal-engine.facade.js';
 
 describe('Today (e2e)', () => {
@@ -40,8 +40,6 @@ describe('Today (e2e)', () => {
   });
 
   it('answers with a section per registered domain, in a fixed order, whatever each one does', async () => {
-    sandboxState.tasksByUser.set(userA.userId, 2);
-
     const started = Date.now();
     const res = await today(userA).expect(200);
     const elapsed = Date.now() - started;
@@ -51,7 +49,7 @@ describe('Today (e2e)', () => {
     expect(res.body.inbox).toEqual({ pending: 0 });
     expect(res.body.sections.map((section: { domain: string }) => `${section.domain}:${section.status}`)).toEqual([
       'calendar:ok', // the real Calendar module's own @TodayContributor('calendar'); this user has no events
-      'tasks:ok',
+      'tasks:ok', // the real Tasks module's own @TodayContributor('tasks'); this user has no tasks - see the Tasks e2e suite for real behavior
       'habits:error',
       'fitness:ok', // the sandbox fixture that records the context it was handed
       'finances:timeout',
@@ -59,13 +57,8 @@ describe('Today (e2e)', () => {
     ]);
     const calendar = res.body.sections.find((section: { domain: string }) => section.domain === 'calendar');
     expect(calendar).toEqual({ domain: 'calendar', status: 'ok', summary: { count: 0 }, items: [] });
-
     const tasks = res.body.sections.find((section: { domain: string }) => section.domain === 'tasks');
-    expect(tasks.summary).toMatchObject({ open: 2 });
-    expect(tasks.items).toEqual([
-      { id: 'task-1', title: 'Task 1', done: false },
-      { id: 'task-2', title: 'Task 2', done: false },
-    ]);
+    expect(tasks).toEqual({ domain: 'tasks', status: 'ok', summary: { dueToday: 0, overdue: 0, scheduledToday: 0 }, items: [] });
 
     // A failed or slow domain carries nothing but its name and status.
     const byDomain = Object.fromEntries(res.body.sections.map((section: { domain: string }) => [section.domain, section]));
@@ -88,17 +81,6 @@ describe('Today (e2e)', () => {
     expect(logged.some((line) => line.includes('"habits"') && line.includes(userA.userId))).toBe(true);
     expect(logged.some((line) => line.includes('"finances"') && line.includes('timed out'))).toBe(true);
     expect(logged.join('\n')).not.toContain('SECRET-HABIT-PAYLOAD');
-  });
-
-  it('gives each user their own data', async () => {
-    sandboxState.tasksByUser.set(userA.userId, 3);
-
-    const a = await today(userA).expect(200);
-    const b = await today(userB).expect(200);
-    const openTasks = (body: { sections: { domain: string; summary?: { open: number } }[] }) =>
-      body.sections.find((section) => section.domain === 'tasks')?.summary?.open;
-    expect(openTasks(a.body)).toBe(3);
-    expect(openTasks(b.body)).toBe(0);
   });
 
   it('defaults the date to today on the user\'s own calendar and tells contributors the timezone', async () => {
@@ -142,8 +124,8 @@ describe('Today (e2e)', () => {
   });
 
   it('reports how many suggestions are waiting in the inbox, per user', async () => {
-    await emitBillDue(facade, userA.userId);
-    await emitBillDue(facade, userA.userId);
+    await emitWorkoutCompleted(facade, userA.userId);
+    await emitWorkoutCompleted(facade, userA.userId);
 
     expect((await today(userA).expect(200)).body.inbox).toEqual({ pending: 2 });
     expect((await today(userB).expect(200)).body.inbox).toEqual({ pending: 0 });
