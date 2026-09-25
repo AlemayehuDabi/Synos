@@ -8,12 +8,12 @@ import { sandboxState, sleep } from './sandbox-state.js';
 
 /**
  * Healthy: reports a configurable completed count, and records the context it was
- * handed. Uses 'fitness', since the real Calendar and Tasks modules now supply
- * @ReviewContributor('calendar')/@ReviewContributor('tasks').
+ * handed. Uses 'system', the one SignalDomain no real module (calendar, tasks, habits,
+ * fitness) claims - it is only ever a stand-in slot in tests.
  */
 @Injectable()
-@ReviewContributor('fitness')
-export class SandboxFitnessReview implements ReviewContributor {
+@ReviewContributor('system')
+export class SandboxSystemReview implements ReviewContributor {
   async collect(context: ReviewContext): Promise<ReviewContribution> {
     sandboxState.reviewContexts.push(context);
     const completed = sandboxState.tasksByUser.get(context.userId) ?? 0;
@@ -48,7 +48,7 @@ export class SandboxMealsReview implements ReviewContributor {
 }
 
 /** One healthy domain. */
-@Module({ providers: [SandboxFitnessReview] })
+@Module({ providers: [SandboxSystemReview] })
 export class SandboxReviewModule {}
 
 /** Adds a throwing and a too-slow domain on top of SandboxReviewModule. */

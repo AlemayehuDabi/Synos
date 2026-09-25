@@ -10,7 +10,7 @@ import {
 import { SandboxDetector } from './sandbox-detector.js';
 
 /**
- * Test-only stand-in for the domain modules (fitness, finances, meals) that
+ * Test-only stand-in for the domain modules (finances, meals) that
  * don't exist yet. Never imported from src/ - e2e specs add it alongside
  * AppModule in Test.createTestingModule so the engine's DiscoveryService-based
  * registry picks up these fixtures exactly the way it would pick up a real

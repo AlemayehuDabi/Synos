@@ -51,9 +51,10 @@ describe('Today (e2e)', () => {
       'calendar:ok', // the real Calendar module's own @TodayContributor('calendar'); this user has no events
       'tasks:ok', // the real Tasks module's own @TodayContributor('tasks'); this user has no tasks - see the Tasks e2e suite for real behavior
       'habits:ok', // the real Habits module's own @TodayContributor('habits'); this user has no habits - see the Habits e2e suite for real behavior
-      'fitness:ok', // the sandbox fixture that records the context it was handed
+      'fitness:ok', // the real Fitness module's own @TodayContributor('fitness'); this user has no workouts - see the Fitness e2e suite for real behavior
       'finances:timeout',
       'meals:error',
+      'system:ok', // the sandbox fixture that records the context it was handed
     ]);
     const calendar = res.body.sections.find((section: { domain: string }) => section.domain === 'calendar');
     expect(calendar).toEqual({ domain: 'calendar', status: 'ok', summary: { count: 0 }, items: [] });
@@ -61,6 +62,8 @@ describe('Today (e2e)', () => {
     expect(tasks).toEqual({ domain: 'tasks', status: 'ok', summary: { dueToday: 0, overdue: 0, scheduledToday: 0 }, items: [] });
     const habits = res.body.sections.find((section: { domain: string }) => section.domain === 'habits');
     expect(habits).toEqual({ domain: 'habits', status: 'ok', summary: { scheduledCount: 0, doneCount: 0 }, items: [] });
+    const fitness = res.body.sections.find((section: { domain: string }) => section.domain === 'fitness');
+    expect(fitness).toEqual({ domain: 'fitness', status: 'ok', summary: { completed: 0, inProgress: 0, planned: 0, totalMinutes: 0 }, items: [] });
 
     // A failed or slow domain carries nothing but its name and status.
     const byDomain = Object.fromEntries(res.body.sections.map((section: { domain: string }) => [section.domain, section]));

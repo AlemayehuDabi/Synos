@@ -56,7 +56,7 @@ describe('Calendar: GET /calendar/view (e2e)', () => {
   it('reports every registered contributor\'s status, and a healthy one never blocks a failing one', async () => {
     const res = await view(userA, { from: '2026-09-22', to: '2026-09-22' }).expect(200);
     const byDomain = Object.fromEntries(res.body.contributors.map((c: { domain: string; status: string }) => [c.domain, c.status]));
-    expect(byDomain).toEqual({ tasks: 'ok', fitness: 'ok', habits: 'error', finances: 'timeout', meals: 'error' });
+    expect(byDomain).toEqual({ tasks: 'ok', fitness: 'ok', habits: 'error', finances: 'timeout', meals: 'error', system: 'ok' });
   });
 
   it('never leaks what a failing contributor returned or threw, in the response or the logs', async () => {

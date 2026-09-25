@@ -51,6 +51,10 @@ export const envSchema = z.object({
 
   HABITS_TOMBSTONE_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
   HABITS_GRACE_WINDOW_DAYS: z.coerce.number().int().nonnegative().default(1),
+
+  FITNESS_TOMBSTONE_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
+  FITNESS_SLEEP_POOR_THRESHOLD_MIN: z.coerce.number().int().positive().default(360),
+  FITNESS_HEAVY_LOAD_THRESHOLD: z.coerce.number().positive().default(2500),
 });
 
 export type Env = z.infer<typeof envSchema>;

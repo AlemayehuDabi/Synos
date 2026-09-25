@@ -115,3 +115,41 @@ export function numericCompoundCursorWhere(sortField: string, cursor: DecodedNum
     ],
   };
 }
+
+/**
+ * Same idea again for a text sort field (e.g. an exercise's `name`), ascending or descending,
+ * with the row id as the tiebreaker. The id is always the last `|`-separated part, so a sort
+ * value that itself contains `|` round-trips.
+ */
+export function encodeStringCompoundCursor(sortValue: string, id: string): string {
+  return encodeCursor(`${sortValue}|${id}`);
+}
+
+export interface DecodedStringCompoundCursor {
+  sortValue: string;
+  id: string;
+}
+
+export function decodeStringCompoundCursor(cursor: string): DecodedStringCompoundCursor {
+  const raw = decodeCursor(cursor);
+  const separatorIndex = raw.lastIndexOf('|');
+  if (separatorIndex === -1) {
+    throw new BadRequestException('Malformed cursor');
+  }
+  const sortValue = raw.slice(0, separatorIndex);
+  const id = raw.slice(separatorIndex + 1);
+  if (!UUID_PATTERN.test(id)) {
+    throw new BadRequestException('Malformed cursor');
+  }
+  return { sortValue, id };
+}
+
+export function stringCompoundCursorWhere(sortField: string, cursor: DecodedStringCompoundCursor, direction: 'asc' | 'desc' = 'asc') {
+  const op = direction === 'desc' ? 'lt' : 'gt';
+  return {
+    OR: [
+      { [sortField]: { [op]: cursor.sortValue } },
+      { [sortField]: { equals: cursor.sortValue }, id: { [op]: cursor.id } },
+    ],
+  };
+}

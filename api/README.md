@@ -15,9 +15,12 @@ The NestJS backend for Synos. What lives here so far:
   reminder/recovery-to-task-load connections. See [Tasks](#tasks).
 - **Habits**: build/break habits, streaks with grace, and the
   workout-to-habit/recurring-task-to-habit connections. See [Habits](#habits).
+- **Fitness**: workouts, exercises, programs, body metrics, wearable samples,
+  and the workout.completed/sleep.poor/training.heavy signals. See
+  [Fitness](#fitness).
 
-Fitness, Finances and Meals don't exist yet; the signal engine's connection
-catalog and domain enums already have room for them.
+Finances and Meals don't exist yet; the signal engine's connection catalog and
+domain enums already have room for them.
 
 ## Stack
 
@@ -115,7 +118,11 @@ export inclusion, account-deletion cascade and retention, in
 `test/e2e/today-reviews-notifications/`, and calendar (CRUD, all edit/delete
 scopes, client-supplied ids, idempotent create, view merging with a failing and a
 timing-out soft-block contributor, free-slot computation, tombstone exclusion,
-export inclusion and account-deletion cascade) in `test/e2e/calendar/`. Better
+export inclusion and account-deletion cascade) in `test/e2e/calendar/`, and
+fitness (CRUD across every resource, completion signals, wearable ingest and
+dedupe, the sleep/training detectors running once a day, Today/Review/calendar
+output, privacy, cross-user isolation, export inclusion, account-deletion
+cascade and tombstone retention) in `test/e2e/fitness/`. Better
 Auth's sign-up/sign-in rate limits stay enabled in e2e (5 per minute), so keep
 each spec file to at most 5 `signUpAndVerify` calls.
 
@@ -497,12 +504,13 @@ here's what was chosen and why:
 Three modules that sit on top of the domains (tasks, habits, fitness, finances,
 meals, calendar) without knowing any of them. `GET /today` and the weekly/monthly
 reviews are assembled from **contributors** that each domain declares; a domain
-tells the user something through **`NotificationsFacade`**. Calendar, Tasks and
-Habits register real contributors (`@TodayContributor`, `@ReviewContributor`,
-and, for Calendar/Tasks specifically, `@CalendarBlockContributor` - Habits
-exposes nothing there, since habits are not scheduled events); Fitness,
-Finances and Meals don't exist yet, so their sections are exercised by
-test-only fakes under `test/sandbox/`.
+tells the user something through **`NotificationsFacade`**. Calendar, Tasks,
+Habits and Fitness register real contributors (`@TodayContributor`,
+`@ReviewContributor`, and, for Calendar/Tasks/Fitness specifically,
+`@CalendarBlockContributor` - Habits exposes nothing there, since habits are not
+scheduled events); Finances and Meals don't exist yet, so their sections are
+exercised by test-only fakes under `test/sandbox/`, which also keep one healthy
+fake on the otherwise unused `system` domain.
 
 | Route | What it does |
 | --- | --- |
@@ -1063,6 +1071,97 @@ ground truth.
 | --- | --- | --- |
 | `HABITS_TOMBSTONE_RETENTION_DAYS` | `90` | Deleted habits (and entries deleted on their own) are hard-deleted this many days after deletion |
 | `HABITS_GRACE_WINDOW_DAYS` | `1` | Consecutive missed scheduled units tolerated as a single gap before a streak breaks |
+
+## Fitness
+
+Fitness owns `Exercise`, `Workout` (with `WorkoutExercise`/`WorkoutSet`),
+`Program` (with `ProgramWorkout`), `BodyMetric` and `WearableSample`. It never
+writes into another domain's data - it only emits signals (below) and
+contributes to Today, reviews, the calendar and the data export (see
+[Today, reviews and notifications](#today-reviews-and-notifications) and
+[Calendar](#calendar)).
+
+| Route | What it does |
+| --- | --- |
+| `GET /api/v1/workouts?from&to&workoutType&completed&cursor&limit` | Cursor-paginated, newest start first |
+| `POST /api/v1/workouts` | Create, optionally with nested `exercises` and their `sets` (accepts `Idempotency-Key`) |
+| `GET/PATCH/DELETE /api/v1/workouts/:id` | `PATCH` replaces the nested `exercises` when given; `DELETE` is a soft delete |
+| `POST /api/v1/workouts/:id/complete` | Sets `completedAt` (default now) and emits `workout.completed`; completing twice is a 409 (accepts `Idempotency-Key`) |
+| `GET /api/v1/exercises?category&muscleGroup&q&isCustom&cursor&limit` | The seeded library plus the caller's own custom exercises, by name |
+| `POST /api/v1/exercises` | Create a custom exercise; a name the caller already uses is a 409 (accepts `Idempotency-Key`) |
+| `GET /api/v1/programs?isActive&cursor&limit`, `POST /api/v1/programs` | Newest first; create takes planned `workouts` (`dayOffset` + `workoutTemplate`) (accepts `Idempotency-Key`) |
+| `GET/PATCH/DELETE /api/v1/programs/:id` | `PATCH` replaces the planned `workouts` when given |
+| `POST /api/v1/programs/:id/activate` | Makes it the one active program, deactivating any other; idempotent |
+| `GET /api/v1/body-metrics?from&to&cursor&limit`, `POST /api/v1/body-metrics` | Newest date first; `date` defaults to today in the caller's timezone; at least one of `weightKg`/`bodyFatPct`/`notes` is required (accepts `Idempotency-Key`) |
+| `PATCH/DELETE /api/v1/body-metrics/:id` | |
+| `POST /api/v1/wearables/samples` | Batch ingest of up to 500 samples (accepts `Idempotency-Key`); answers `{ received, created, duplicates, conflicts }` |
+| `GET /api/v1/wearables/sleep?from&to` | One entry per night with sleep data, flagged `poor` against the threshold; defaults to the last 7 days, at most 90 |
+
+Owner-scoped, validated, documented in OpenAPI (`/docs`), standard error shape.
+A client may supply a workout's `id`; creating one that already exists is a 409.
+
+### Manual logs are ground truth
+
+A wearable sample is only ever stored as a `WearableSample`; it never creates,
+edits or completes a `Workout`. `dedupeKey` is unique per user, so re-sending a
+batch (or part of one) is harmless: repeats are counted as `duplicates`, and a
+key repeated inside one batch keeps its first sample. A `workout` sample that
+overlaps a manual, live workout and disagrees with it (a different type, or a
+duration off by more than the larger of 5 minutes and 20%) is still stored, but flagged
+`conflict` and linked to that workout, and counted in `conflicts`. Sleep nights
+are grouped by wake-up date in the user's own timezone, and overlapping
+samples from more than one device are counted once.
+
+### Privacy
+
+Everything above is visible only to its owner. `PrivacySettings.fitness`
+(`private` by default, see `GET`/`PATCH /api/v1/me/privacy`) decides how much
+Fitness hands to *other domains*: while `private`, its calendar blocks only say
+the time is busy (`Workout`, no link back); once `shared`, they carry the
+workout's own title and a `ref` to it.
+
+### Signals emitted
+
+| Signal | When | Payload |
+| --- | --- | --- |
+| `workout.completed` | `POST /workouts/:id/complete`, in the same transaction as the completion (transactional outbox, delivered by the signal sweeper) | `workoutId`, `completedAt`, `durationMinutes`, `workoutType` |
+| `sleep.poor` | The `fitness-sleep-poor` detector (hourly): the night that ended on the user's local today is shorter than `FITNESS_SLEEP_POOR_THRESHOLD_MIN` | `date`, `durationMinutes` |
+| `training.heavy` | The `fitness-training-heavy` detector (hourly): the last 7 days of completed workouts add up to at least `FITNESS_HEAVY_LOAD_THRESHOLD` | `date`, `loadScore`, `windowDays` |
+
+Both detectors emit at most once per user per local day and condition (the
+signal's `dedupeKey` is the date), however often they run. A workout's load is
+its minutes times its average set RPE (5 when none is logged); the load score
+is the sum over the window. Fitness registers no handler for `workout-to-habit`
+(Habits owns it) and none for the recovery connection either: `sleep.poor` and
+`training.heavy` are consumed by Tasks' `recovery-to-task-load`.
+
+### Today, review, calendar and export
+
+- **Today** (`@TodayContributor('fitness')`): today's completed and in-progress
+  workouts, plus the active program's session planned for today (`dayOffset`
+  counted from the day it was activated) unless a workout from that program is
+  already completed today.
+- **Review** (`@ReviewContributor('fitness')`): workouts completed, total and
+  average duration, and the weight/body-fat change across the period.
+- **Calendar** (`@CalendarBlockContributor('fitness')`): each workout from its
+  start to its completion (or start plus its recorded duration) as a busy
+  block; one with no known end takes no time. See Privacy above.
+- **Export**: exercises (the user's own custom ones), workouts, workout
+  exercises and sets, programs and their planned workouts, body metrics and
+  wearable samples.
+
+Deleting a workout tombstones it; a daily cron hard-deletes tombstones (with
+their exercises and sets) after `FITNESS_TOMBSTONE_RETENTION_DAYS`. Deleting an
+account cascades through every fitness table; the shared exercise library is
+untouched.
+
+### Environment variables
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `FITNESS_TOMBSTONE_RETENTION_DAYS` | `90` | Deleted workouts are hard-deleted this many days after deletion |
+| `FITNESS_SLEEP_POOR_THRESHOLD_MIN` | `360` | A night shorter than this many minutes is `poor` (and emits `sleep.poor`) |
+| `FITNESS_HEAVY_LOAD_THRESHOLD` | `2500` | A 7-day training load at or above this emits `training.heavy` |
 
 ## Local Postgres without Docker
 

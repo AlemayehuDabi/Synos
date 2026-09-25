@@ -44,6 +44,12 @@ model User {
   habits       Habit[]
   habitEntries HabitEntry[]
 
+  exercises       Exercise[]
+  workouts        Workout[]
+  programs        Program[]
+  bodyMetrics     BodyMetric[]
+  wearableSamples WearableSample[]
+
   @@unique([email])
   @@map("user")
 }
@@ -747,4 +753,181 @@ model HabitEntry {
   @@unique([habitId, date])
   @@index([userId, date])
   @@map("habit_entries")
+}
+
+enum FitnessSource {
+  manual
+  suggestion
+  auto
+  sync
+}
+
+enum ExerciseCategory {
+  strength
+  cardio
+  flexibility
+  mobility
+  sports
+  other
+}
+
+enum WearableSampleType {
+  steps
+  sleep
+  heartRate
+  activeEnergy
+  workout
+}
+
+/// A movement a workout is built from. `userId` null is the seeded, read-only library
+/// (`isCustom` false); a user's own additions carry their `userId` (`isCustom` true).
+model Exercise {
+  id           String           @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  userId       String?          @db.Uuid
+  user         User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  category     ExerciseCategory
+  muscleGroups String[]         @default([])
+  isCustom     Boolean          @default(false)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  workoutExercises WorkoutExercise[]
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@map("exercises")
+}
+
+/// A logged (or in-progress) workout. `completedAt` null means not completed yet.
+/// `deletedAt` marks a tombstone.
+model Workout {
+  id              String        @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  userId          String        @db.Uuid
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title           String?
+  workoutType     String
+  startedAt       DateTime
+  completedAt     DateTime?
+  durationMinutes Int?
+  notes           String?
+  programId       String?       @db.Uuid
+  program         Program?      @relation(fields: [programId], references: [id], onDelete: SetNull)
+  source          FitnessSource @default(manual)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  deletedAt       DateTime?
+
+  exercises          WorkoutExercise[]
+  conflictingSamples WearableSample[]  @relation("SampleConflict")
+
+  @@index([userId, startedAt])
+  @@index([programId])
+  @@index([deletedAt])
+  @@map("workouts")
+}
+
+model WorkoutExercise {
+  id         String   @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  workoutId  String   @db.Uuid
+  workout    Workout  @relation(fields: [workoutId], references: [id], onDelete: Cascade)
+  exerciseId String   @db.Uuid
+  // Deferred to commit in the migration (see there): account deletion cascades to exercises and workouts in either order.
+  exercise   Exercise @relation(fields: [exerciseId], references: [id], onDelete: NoAction)
+  sortOrder  Int      @default(0)
+
+  sets WorkoutSet[]
+
+  @@index([workoutId, sortOrder])
+  @@index([exerciseId])
+  @@map("workout_exercises")
+}
+
+model WorkoutSet {
+  id                String          @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  workoutExerciseId String          @db.Uuid
+  workoutExercise   WorkoutExercise @relation(fields: [workoutExerciseId], references: [id], onDelete: Cascade)
+  setNumber         Int
+  reps              Int?
+  weightKg          Float?
+  durationSeconds   Int?
+  distanceMeters    Float?
+  rpe               Float?
+
+  @@unique([workoutExerciseId, setNumber])
+  @@map("workout_sets")
+}
+
+/// A training plan. At most one is active per user; `activatedAt` is day zero for
+/// each ProgramWorkout's `dayOffset`.
+model Program {
+  id          String    @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  userId      String    @db.Uuid
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  isActive    Boolean   @default(false)
+  activatedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  workouts       ProgramWorkout[]
+  loggedWorkouts Workout[]
+
+  @@index([userId, isActive])
+  @@map("programs")
+}
+
+/// One planned session of a Program, `dayOffset` days after the program was activated.
+/// `workoutTemplate` is `{ workoutType, title?, durationMinutes?, exercises?: [{ exerciseId, sets? }] }`.
+model ProgramWorkout {
+  id              String  @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  programId       String  @db.Uuid
+  program         Program @relation(fields: [programId], references: [id], onDelete: Cascade)
+  dayOffset       Int
+  workoutTemplate Json
+
+  @@index([programId, dayOffset])
+  @@map("program_workouts")
+}
+
+/// A body measurement on a calendar date (stored as a UTC midnight, like HabitEntry).
+model BodyMetric {
+  id         String        @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  userId     String        @db.Uuid
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date       DateTime
+  weightKg   Float?
+  bodyFatPct Float?
+  notes      String?
+  source     FitnessSource @default(manual)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  @@index([userId, date])
+  @@map("body_metrics")
+}
+
+/// Raw data pushed by a wearable/health platform. Never merged into a manual Workout:
+/// a `workout` sample that overlaps a manual workout but disagrees with it is kept as
+/// its own row with `conflict` set and `conflictWorkoutId` pointing at that workout.
+model WearableSample {
+  id                String             @id @default(dbgenerated("pg_catalog.gen_random_uuid()")) @db.Uuid
+  userId            String             @db.Uuid
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type              WearableSampleType
+  startsAt          DateTime
+  endsAt            DateTime
+  value             Json
+  sourceDevice      String
+  dedupeKey         String
+  conflict          Boolean            @default(false)
+  conflictWorkoutId String?            @db.Uuid
+  conflictWorkout   Workout?           @relation("SampleConflict", fields: [conflictWorkoutId], references: [id], onDelete: SetNull)
+  createdAt         DateTime           @default(now())
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, type, startsAt])
+  @@index([conflictWorkoutId])
+  @@map("wearable_samples")
 }

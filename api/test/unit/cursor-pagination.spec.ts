@@ -3,11 +3,14 @@ import {
   compoundCursorWhere,
   decodeCompoundCursor,
   decodeNumericCompoundCursor,
+  decodeStringCompoundCursor,
   DEFAULT_PAGE_SIZE,
   encodeCompoundCursor,
   encodeNumericCompoundCursor,
+  encodeStringCompoundCursor,
   MAX_PAGE_SIZE,
   numericCompoundCursorWhere,
+  stringCompoundCursorWhere,
   resolvePageSize,
 } from '../../src/common/pagination/cursor-pagination.js';
 
@@ -89,6 +92,39 @@ describe('numericCompoundCursorWhere', () => {
   it('is "strictly after" for ascending pagination', () => {
     expect(numericCompoundCursorWhere('sortOrder', cursor, 'asc')).toEqual({
       OR: [{ sortOrder: { gt: cursor.sortValue } }, { sortOrder: { equals: cursor.sortValue }, id: { gt: cursor.id } }],
+    });
+  });
+});
+
+describe('encodeStringCompoundCursor / decodeStringCompoundCursor', () => {
+  const id = '2a3b4c5d-0000-4000-8000-000000000000';
+
+  it('round-trips a (sortValue, id) pair', () => {
+    expect(decodeStringCompoundCursor(encodeStringCompoundCursor('Bench Press', id))).toEqual({ sortValue: 'Bench Press', id });
+  });
+
+  it('round-trips a sort value that contains the separator', () => {
+    expect(decodeStringCompoundCursor(encodeStringCompoundCursor('Push|Pull', id))).toEqual({ sortValue: 'Push|Pull', id });
+  });
+
+  it('rejects a malformed cursor', () => {
+    expect(() => decodeStringCompoundCursor(Buffer.from('no-separator').toString('base64url'))).toThrow('Malformed cursor');
+    expect(() => decodeStringCompoundCursor(Buffer.from('Bench|not-a-uuid').toString('base64url'))).toThrow('Malformed cursor');
+  });
+});
+
+describe('stringCompoundCursorWhere', () => {
+  const cursor = { sortValue: 'Bench Press', id: '2a3b4c5d-0000-4000-8000-000000000000' };
+
+  it('defaults to "strictly after" (ascending pagination)', () => {
+    expect(stringCompoundCursorWhere('name', cursor)).toEqual({
+      OR: [{ name: { gt: 'Bench Press' } }, { name: { equals: 'Bench Press' }, id: { gt: cursor.id } }],
+    });
+  });
+
+  it('is "strictly before" for descending pagination', () => {
+    expect(stringCompoundCursorWhere('name', cursor, 'desc')).toEqual({
+      OR: [{ name: { lt: 'Bench Press' } }, { name: { equals: 'Bench Press' }, id: { lt: cursor.id } }],
     });
   });
 });

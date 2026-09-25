@@ -4,12 +4,12 @@ import { sandboxState, sleep } from './sandbox-state.js';
 
 /**
  * Records the context it was handed, so specs can check the date and timezone. Uses
- * 'fitness', the one SignalDomain none of the other fixtures here or the real Calendar
- * and Tasks modules' own @TodayContributor('calendar')/@TodayContributor('tasks') claim.
+ * 'system', the one SignalDomain no real module (calendar, tasks, habits, fitness) and
+ * none of the other fixtures here claim - it is only ever a stand-in slot in tests.
  */
 @Injectable()
-@TodayContributor('fitness')
-export class SandboxFitnessToday implements TodayContributor {
+@TodayContributor('system')
+export class SandboxSystemToday implements TodayContributor {
   async collect(context: TodayContext): Promise<TodayContribution> {
     sandboxState.todayContexts.push(context);
     return { summary: { events: 0 }, items: [] };
@@ -41,6 +41,6 @@ export class SandboxMealsToday implements TodayContributor {
 
 /** Three fake domains: one healthy, one too slow, one throwing. */
 @Module({
-  providers: [SandboxFitnessToday, SandboxFinancesToday, SandboxMealsToday],
+  providers: [SandboxSystemToday, SandboxFinancesToday, SandboxMealsToday],
 })
 export class SandboxTodayModule {}
