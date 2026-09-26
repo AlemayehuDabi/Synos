@@ -13,6 +13,7 @@ class EmptyState extends StatelessWidget {
     this.message,
     this.actionLabel,
     this.onAction,
+    this.accentColor,
   });
 
   factory EmptyState.networkError({VoidCallback? onRetry}) => EmptyState(
@@ -29,6 +30,10 @@ class EmptyState extends StatelessWidget {
   final String? actionLabel;
   final VoidCallback? onAction;
 
+  /// Tints the icon and its circle, e.g. with a domain's accent. Neutral
+  /// when omitted.
+  final Color? accentColor;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -43,13 +48,15 @@ class EmptyState extends StatelessWidget {
               width: 72,
               height: 72,
               decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest,
+                color:
+                    accentColor?.withValues(alpha: 0.14) ??
+                    theme.colorScheme.surfaceContainerHighest,
                 shape: BoxShape.circle,
               ),
               child: Icon(
                 icon,
                 size: 32,
-                color: theme.colorScheme.onSurfaceVariant,
+                color: accentColor ?? theme.colorScheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: AppSpacing.sm),
