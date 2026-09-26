@@ -20,15 +20,23 @@ class TodayController extends AsyncNotifier<TodaySnapshot> {
   @override
   Future<TodaySnapshot> build() => ref.watch(todayRepositoryProvider).fetch();
 
-  /// Pull-to-refresh. Riverpod keeps the previous day on the state while it
-  /// reloads, and if the reload fails the previous day stays there with the
-  /// error alongside it.
+  /// Pull-to-refresh, and the retry button. Riverpod keeps the day on the
+  /// state while it reloads. If the reload fails and there was a day to show,
+  /// that day stays (and the failure is recorded, for the screen to mention);
+  /// if there was nothing to show, the state becomes the error.
   Future<void> refresh() async {
+    final before = state;
+    final hadDay = before.hasValue && !before.hasError;
     state = const AsyncLoading<TodaySnapshot>();
     try {
       state = AsyncData(await ref.read(todayRepositoryProvider).fetch());
     } catch (error, stackTrace) {
-      state = AsyncError<TodaySnapshot>(error, stackTrace);
+      if (hadDay) {
+        state = before;
+        ref.read(todayRefreshFailuresProvider.notifier).record();
+      } else {
+        state = AsyncError<TodaySnapshot>(error, stackTrace);
+      }
     }
   }
 

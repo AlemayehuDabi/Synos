@@ -32,6 +32,27 @@ class _FlakyRepository extends MockTodayRepository {
   }
 }
 
+/// Fails the first load, then works.
+class _FailsOnceRepository extends MockTodayRepository {
+  _FailsOnceRepository()
+    : super(
+        scenario: TodayScenario.populated,
+        now: _now,
+        latency: Duration.zero,
+      );
+
+  var _failed = false;
+
+  @override
+  Future<TodaySnapshot> fetch() async {
+    if (!_failed) {
+      _failed = true;
+      throw const TodayLoadException();
+    }
+    return super.fetch();
+  }
+}
+
 void main() {
   group('scenarios', () {
     test('a busy day has something in every domain', () async {
@@ -439,21 +460,60 @@ void main() {
       expect(seen.last.value, isNotNull);
     });
 
-    test(
-      'a failed refresh keeps the previous day and reports the error',
-      () async {
-        final container = containerFor(_FlakyRepository());
-        await container.read(todayControllerProvider.future);
+    test('a failed refresh keeps the day and records the failure', () async {
+      final container = containerFor(_FlakyRepository());
+      await container.read(todayControllerProvider.future);
+      expect(container.read(todayRefreshFailuresProvider), 0);
 
-        await container.read(todayControllerProvider.notifier).refresh();
+      await container.read(todayControllerProvider.notifier).refresh();
 
-        final state = container.read(todayControllerProvider);
-        expect(state.hasError, isTrue);
-        expect(state.error, isA<TodayLoadException>());
-        expect(state.value, isNotNull, reason: 'the old day is still there');
-        expect(state.value!.schedule, hasLength(6));
-      },
-    );
+      final state = container.read(todayControllerProvider);
+      expect(
+        state.hasError,
+        isFalse,
+        reason: 'there is still a good day to show',
+      );
+      expect(state.value!.schedule, hasLength(6));
+      expect(container.read(todayRefreshFailuresProvider), 1);
+
+      await container.read(todayControllerProvider.notifier).refresh();
+      expect(container.read(todayRefreshFailuresProvider), 2);
+    });
+
+    test('a refresh that fails with nothing to show stays an error', () async {
+      final container = containerFor(_repo(TodayScenario.loadError));
+      final sub = container.listen(todayControllerProvider, (_, _) {});
+      addTearDown(sub.close);
+      await expectLater(
+        container.read(todayControllerProvider.future),
+        throwsA(isA<TodayLoadException>()),
+      );
+
+      await container.read(todayControllerProvider.notifier).refresh();
+
+      expect(container.read(todayControllerProvider).hasError, isTrue);
+      expect(
+        container.read(todayRefreshFailuresProvider),
+        0,
+        reason: 'not a failed refresh, a failed load',
+      );
+    });
+
+    test('retrying after a failed load recovers once it works', () async {
+      final container = containerFor(_FailsOnceRepository());
+      final sub = container.listen(todayControllerProvider, (_, _) {});
+      addTearDown(sub.close);
+      await expectLater(
+        container.read(todayControllerProvider.future),
+        throwsA(isA<TodayLoadException>()),
+      );
+
+      await container.read(todayControllerProvider.notifier).refresh();
+
+      final state = container.read(todayControllerProvider);
+      expect(state.hasError, isFalse);
+      expect(state.value!.schedule, hasLength(6));
+    });
 
     test('a load that fails outright has an error and no day', () async {
       final container = containerFor(_repo(TodayScenario.loadError));

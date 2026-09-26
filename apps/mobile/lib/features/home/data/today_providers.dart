@@ -24,3 +24,16 @@ final todayRepositoryProvider = Provider<TodayRepository>(
     now: DateTime.now(),
   ),
 );
+
+/// How many pull-to-refreshes have failed. A failed refresh keeps the day on
+/// screen (there is still a good day to show), so it is reported here, for
+/// the screen to say so, rather than as an error state that would replace it.
+final todayRefreshFailuresProvider =
+    NotifierProvider<TodayRefreshFailures, int>(TodayRefreshFailures.new);
+
+class TodayRefreshFailures extends Notifier<int> {
+  @override
+  int build() => 0;
+
+  void record() => state++;
+}
