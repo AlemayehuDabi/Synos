@@ -17,3 +17,9 @@ abstract final class AppRadius {
   static const double chip = 999; // pill
   static const double modal = 20;
 }
+
+abstract final class AppInsets {
+  /// Bottom padding for scrolling content, so the floating quick-add button
+  /// never covers its last row.
+  static const double fabClearance = 88;
+}

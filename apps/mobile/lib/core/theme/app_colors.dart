@@ -33,6 +33,10 @@ abstract final class AppColors {
   /// be submitted). Never for a missed habit or an overdue task.
   static const Color danger = Color(0xFFC0453D);
 
+  /// [danger] lifted for alert text and icons on dark surfaces (about 6:1
+  /// against [darkSurface]; [danger] itself is 3.4:1 there).
+  static const Color dangerOnDark = Color(0xFFDE7A72);
+
   // Light surfaces: warm off-white, never pure white.
   static const Color lightBackground = Color(0xFFFAF8F5);
   static const Color lightSurface = Color(0xFFFFFEFC);

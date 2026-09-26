@@ -4,14 +4,19 @@ import '../theme/app_spacing.dart';
 
 /// Shows a themed modal bottom sheet with consistent padding and a safe
 /// area for the keyboard/home indicator.
+///
+/// Pass [useRootNavigator] to cover the whole app shell (its bar or rail
+/// too) instead of just the destination it was opened from.
 Future<T?> showAppBottomSheet<T>({
   required BuildContext context,
   required WidgetBuilder builder,
   bool isScrollControlled = true,
+  bool useRootNavigator = false,
 }) {
   return showModalBottomSheet<T>(
     context: context,
     isScrollControlled: isScrollControlled,
+    useRootNavigator: useRootNavigator,
     useSafeArea: true,
     builder: (context) => Padding(
       padding: EdgeInsets.only(
@@ -34,10 +39,7 @@ Future<T?> showAppDialog<T>({
 }) {
   return showDialog<T>(
     context: context,
-    builder: (context) => AlertDialog(
-      title: Text(title),
-      content: content,
-      actions: actions,
-    ),
+    builder: (context) =>
+        AlertDialog(title: Text(title), content: content, actions: actions),
   );
 }

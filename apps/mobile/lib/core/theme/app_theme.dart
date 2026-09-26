@@ -129,6 +129,29 @@ abstract final class AppTheme {
         ),
         unselectedLabelTextStyle: labelMedium.copyWith(color: textSecondary),
       ),
+      floatingActionButtonTheme: FloatingActionButtonThemeData(
+        backgroundColor: colorScheme.primary,
+        foregroundColor: AppColors.onPrimary,
+        elevation: 2,
+        focusElevation: 2,
+        hoverElevation: 3,
+        highlightElevation: 3,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.card + AppSpacing.xxs),
+        ),
+        extendedTextStyle: textTheme.titleMedium?.copyWith(
+          color: AppColors.onPrimary,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      badgeTheme: BadgeThemeData(
+        backgroundColor: colorScheme.primary,
+        textColor: AppColors.onPrimary,
+        textStyle: labelSmall.copyWith(
+          color: AppColors.onPrimary,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
       cardTheme: CardThemeData(
         color: surface,
         elevation: 0,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/quick_add/presentation/quick_add_button.dart';
 import '../layout/breakpoints.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
@@ -43,12 +44,22 @@ class AppShell extends StatelessWidget {
     final size = WindowSize.of(context);
     final current = _current;
 
+    // The universal quick-add button, opening on the domain being looked at.
+    // On a compact window it floats over a destination's root only (not over
+    // a detail); on a wider one it sits in the rail, which is always there.
+    final path = GoRouter.of(context).state.uri.path;
+    final atRoot = AppDestination.values.any((d) => d.path == path);
+    final quickAddDomain = current.isDomain ? current : null;
+
     final scaffold = size.isCompact
         ? Scaffold(
             // The pages inside handle the keyboard themselves; the bar
             // should stay put underneath it, not ride up on top of it.
             resizeToAvoidBottomInset: false,
             body: navigationShell,
+            floatingActionButton: atRoot
+                ? QuickAddButton(initialDomain: quickAddDomain)
+                : null,
             bottomNavigationBar: _AppBottomBar(
               selected: current.barDestination,
               onSelected: _select,
@@ -62,6 +73,10 @@ class AppShell extends StatelessWidget {
                   selected: current,
                   extended: size == WindowSize.expanded,
                   onSelected: _select,
+                  quickAdd: QuickAddButton(
+                    initialDomain: quickAddDomain,
+                    extended: size == WindowSize.expanded,
+                  ),
                 ),
                 Expanded(child: navigationShell),
               ],
@@ -115,11 +130,13 @@ class _AppRail extends StatelessWidget {
     required this.selected,
     required this.extended,
     required this.onSelected,
+    required this.quickAdd,
   });
 
   final AppDestination selected;
   final bool extended;
   final ValueChanged<AppDestination> onSelected;
+  final Widget quickAdd;
 
   @override
   Widget build(BuildContext context) {
@@ -148,7 +165,13 @@ class _AppRail extends StatelessWidget {
                   selectedIndex: selected.index,
                   onDestinationSelected: (index) =>
                       onSelected(destinations[index]),
-                  leading: _BrandMark(showName: extended),
+                  leading: Column(
+                    children: [
+                      _BrandMark(showName: extended),
+                      quickAdd,
+                      const SizedBox(height: AppSpacing.sm),
+                    ],
+                  ),
                   destinations: [
                     for (final destination in destinations)
                       NavigationRailDestination(
