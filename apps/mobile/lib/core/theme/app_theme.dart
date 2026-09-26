@@ -37,12 +37,15 @@ abstract final class AppTheme {
   }) {
     final isDark = brightness == Brightness.dark;
     final textTheme = AppTypography.textTheme(textPrimary, textSecondary);
+    final labelSmall = textTheme.labelSmall ?? const TextStyle();
+    final labelMedium = textTheme.labelMedium ?? const TextStyle();
 
     final colorScheme = ColorScheme(
       brightness: brightness,
       primary: isDark ? AppColors.primaryLight : AppColors.primary,
       onPrimary: AppColors.onPrimary,
-      secondary: AppColors.accent,
+      // The interactive color: links, focus rings, selected navigation.
+      secondary: isDark ? AppColors.primaryOnDark : AppColors.primaryLight,
       onSecondary: AppColors.onPrimary,
       error: AppColors.danger,
       onError: AppColors.onDanger,
@@ -68,7 +71,7 @@ abstract final class AppTheme {
       scaffoldBackgroundColor: background,
       textTheme: textTheme,
       fontFamily: textTheme.bodyLarge?.fontFamily,
-      splashFactory: InkSparkle.splashFactory,
+      splashFactory: InkRipple.splashFactory,
       dividerColor: border,
       dividerTheme: DividerThemeData(color: border, thickness: 1, space: 1),
       appBarTheme: AppBarThemeData(
@@ -79,6 +82,52 @@ abstract final class AppTheme {
         centerTitle: false,
         titleTextStyle: textTheme.headlineSmall,
         iconTheme: IconThemeData(color: textPrimary),
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: surface,
+        surfaceTintColor: Colors.transparent,
+        shadowColor: Colors.transparent,
+        elevation: 0,
+        height: 64,
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+        indicatorColor: colorScheme.secondary.withValues(alpha: 0.14),
+        indicatorShape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.button),
+        ),
+        iconTheme: WidgetStateProperty.resolveWith((states) {
+          final selected = states.contains(WidgetState.selected);
+          return IconThemeData(
+            size: 24,
+            color: selected ? colorScheme.secondary : textSecondary,
+          );
+        }),
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          final selected = states.contains(WidgetState.selected);
+          return labelSmall.copyWith(
+            color: selected ? colorScheme.secondary : textSecondary,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+          );
+        }),
+      ),
+      navigationRailTheme: NavigationRailThemeData(
+        backgroundColor: surface,
+        elevation: 0,
+        minWidth: 72,
+        minExtendedWidth: 232,
+        indicatorColor: colorScheme.secondary.withValues(alpha: 0.14),
+        indicatorShape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.button),
+        ),
+        selectedIconTheme: IconThemeData(
+          color: colorScheme.secondary,
+          size: 24,
+        ),
+        unselectedIconTheme: IconThemeData(color: textSecondary, size: 24),
+        selectedLabelTextStyle: labelMedium.copyWith(
+          color: colorScheme.secondary,
+          fontWeight: FontWeight.w600,
+        ),
+        unselectedLabelTextStyle: labelMedium.copyWith(color: textSecondary),
       ),
       cardTheme: CardThemeData(
         color: surface,
