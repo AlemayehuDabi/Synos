@@ -27,7 +27,13 @@ class HomeFirstRunState extends StatelessWidget {
             columns;
 
         return ListView(
-          padding: const EdgeInsets.all(padding),
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(
+            padding,
+            padding,
+            padding,
+            AppInsets.fabClearance,
+          ),
           children: [
             const EmptyState(
               icon: Icons.hub_outlined,

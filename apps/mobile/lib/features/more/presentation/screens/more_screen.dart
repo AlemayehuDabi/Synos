@@ -23,7 +23,12 @@ class MoreScreen extends StatelessWidget {
     return AppPage(
       title: 'More',
       body: ListView(
-        padding: const EdgeInsets.all(AppSpacing.sm),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.sm,
+          AppSpacing.sm,
+          AppSpacing.sm,
+          AppInsets.fabClearance,
+        ),
         children: [
           if (showAreas) ...[
             const _SectionLabel('Areas'),

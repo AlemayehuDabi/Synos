@@ -20,4 +20,7 @@ abstract final class RoutePaths {
   static const finance = '/finance';
   static const meals = '/meals';
   static const more = '/more';
+
+  /// Nested under Home, so back returns to Today.
+  static const inbox = '/home/inbox';
 }

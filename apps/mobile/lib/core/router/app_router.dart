@@ -18,6 +18,7 @@ import '../../features/auth/presentation/screens/reset_password_screen.dart';
 import '../../features/auth/presentation/screens/sign_up_screen.dart';
 import '../../features/auth/presentation/screens/splash_screen.dart';
 import '../../features/home/presentation/screens/home_screen.dart';
+import '../../features/inbox/presentation/screens/inbox_screen.dart';
 import '../navigation/app_destination.dart';
 import '../navigation/app_shell.dart';
 import 'domain_routes.dart';
@@ -117,6 +118,12 @@ List<RouteBase> _routesFor(
       GoRoute(
         path: destination.path,
         builder: (context, state) => const HomeScreen(),
+        routes: [
+          GoRoute(
+            path: 'inbox',
+            builder: (context, state) => const InboxScreen(),
+          ),
+        ],
       ),
     ],
     AppDestination.calendar => domainRoutes(
