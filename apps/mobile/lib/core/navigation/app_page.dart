@@ -14,9 +14,9 @@ import '../layout/breakpoints.dart';
 ///   which case the arrow goes there (a domain reached through More on a
 ///   compact window goes back to More).
 ///
-/// Back always means "the screen I came from": it pops when there is
-/// something to pop, and only falls back to [parentPath] when there isn't
-/// (a deep link, a restored state).
+/// Back means "up one level": it pops the page when there is one to pop, and
+/// otherwise moves up the destination hierarchy to [parentPath]. That is also
+/// what a page without a stack does when it was opened by a deep link.
 class AppPage extends StatelessWidget {
   const AppPage({
     super.key,
