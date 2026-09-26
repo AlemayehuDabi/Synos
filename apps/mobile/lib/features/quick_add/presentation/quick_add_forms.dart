@@ -73,6 +73,7 @@ class _EventFormState extends State<EventForm> {
         TextInputField(
           label: 'Title',
           controller: _title,
+          autofocus: true,
           hintText: 'Lunch with Sam',
           textInputAction: TextInputAction.done,
           validator: (v) => Validators.required(v, message: 'Enter a title'),
@@ -149,6 +150,7 @@ class _TaskFormState extends State<TaskForm> {
         TextInputField(
           label: 'Title',
           controller: _title,
+          autofocus: true,
           hintText: 'Send the invoice',
           textInputAction: TextInputAction.done,
           validator: (v) => Validators.required(v, message: 'Enter a title'),
@@ -212,6 +214,7 @@ class _HabitFormState extends State<HabitForm> {
         TextInputField(
           label: 'Habit',
           controller: _name,
+          autofocus: true,
           hintText: 'Read for 20 minutes',
           textInputAction: TextInputAction.done,
           validator: (v) => Validators.required(v, message: 'Enter a name'),
@@ -261,13 +264,7 @@ class _WorkoutFormState extends State<WorkoutForm> {
           label: 'Type',
           accent: accent,
           value: _kind,
-          options: const {
-            WorkoutKind.strength: 'Strength',
-            WorkoutKind.run: 'Run',
-            WorkoutKind.cycle: 'Cycle',
-            WorkoutKind.yoga: 'Yoga',
-            WorkoutKind.other: 'Other',
-          },
+          options: {for (final k in WorkoutKind.values) k: k.label},
           onChanged: (v) => setState(() => _kind = v),
         ),
         ChoiceRow<int>(
@@ -342,6 +339,7 @@ class _ExpenseFormState extends State<ExpenseForm> {
         TextInputField(
           label: 'Amount',
           controller: _amount,
+          autofocus: true,
           hintText: '0.00',
           prefixIcon: Icons.attach_money_rounded,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -355,13 +353,7 @@ class _ExpenseFormState extends State<ExpenseForm> {
           label: 'Category',
           accent: AppDestination.finance.accent!,
           value: _category,
-          options: const {
-            ExpenseCategory.groceries: 'Groceries',
-            ExpenseCategory.dining: 'Dining',
-            ExpenseCategory.transport: 'Transport',
-            ExpenseCategory.bills: 'Bills',
-            ExpenseCategory.other: 'Other',
-          },
+          options: {for (final c in ExpenseCategory.values) c: c.label},
           onChanged: (v) => setState(() => _category = v),
         ),
         TextInputField(
@@ -421,17 +413,13 @@ class _MealFormState extends State<MealForm> {
           label: 'Meal',
           accent: AppDestination.meals.accent!,
           value: _type,
-          options: const {
-            MealType.breakfast: 'Breakfast',
-            MealType.lunch: 'Lunch',
-            MealType.dinner: 'Dinner',
-            MealType.snack: 'Snack',
-          },
+          options: {for (final t in MealType.values) t: t.label},
           onChanged: (v) => setState(() => _type = v),
         ),
         TextInputField(
           label: 'What is it?',
           controller: _description,
+          autofocus: true,
           hintText: 'Lentil soup',
           textInputAction: TextInputAction.done,
           validator: (v) =>

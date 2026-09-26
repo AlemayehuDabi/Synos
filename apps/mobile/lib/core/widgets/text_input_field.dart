@@ -26,6 +26,7 @@ class TextInputField extends StatefulWidget {
     this.inputFormatters,
     this.focusNode,
     this.maxLines = 1,
+    this.autofocus = false,
   });
 
   final String label;
@@ -46,6 +47,7 @@ class TextInputField extends StatefulWidget {
   final List<TextInputFormatter>? inputFormatters;
   final FocusNode? focusNode;
   final int? maxLines;
+  final bool autofocus;
 
   @override
   State<TextInputField> createState() => _TextInputFieldState();
@@ -77,6 +79,7 @@ class _TextInputFieldState extends State<TextInputField> {
           maxLines: widget.obscureText ? 1 : widget.maxLines,
           inputFormatters: widget.inputFormatters,
           focusNode: widget.focusNode,
+          autofocus: widget.autofocus,
           style: theme.textTheme.bodyLarge,
           decoration: InputDecoration(
             hintText: widget.hintText,

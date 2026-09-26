@@ -117,3 +117,32 @@ class MealEntry extends QuickEntry {
   @override
   String get confirmation => 'Meal added';
 }
+
+extension MealTypeLabel on MealType {
+  String get label => switch (this) {
+    MealType.breakfast => 'Breakfast',
+    MealType.lunch => 'Lunch',
+    MealType.dinner => 'Dinner',
+    MealType.snack => 'Snack',
+  };
+}
+
+extension WorkoutKindLabel on WorkoutKind {
+  String get label => switch (this) {
+    WorkoutKind.strength => 'Strength',
+    WorkoutKind.run => 'Run',
+    WorkoutKind.cycle => 'Cycle',
+    WorkoutKind.yoga => 'Yoga',
+    WorkoutKind.other => 'Other',
+  };
+}
+
+extension ExpenseCategoryLabel on ExpenseCategory {
+  String get label => switch (this) {
+    ExpenseCategory.groceries => 'Groceries',
+    ExpenseCategory.dining => 'Dining',
+    ExpenseCategory.transport => 'Transport',
+    ExpenseCategory.bills => 'Bills',
+    ExpenseCategory.other => 'Other',
+  };
+}
