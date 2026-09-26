@@ -30,7 +30,7 @@ void main() {
       final router = await pumpApp(tester);
 
       expect(locationOf(router), '/home');
-      expect(appBarTitle('Home'), findsOneWidget);
+      expect(appBarTitle('Today'), findsOneWidget);
       final bar = tester.widget<NavigationBar>(find.byType(NavigationBar));
       expect(bar.selectedIndex, 0);
     });

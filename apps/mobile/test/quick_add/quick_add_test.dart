@@ -15,8 +15,12 @@ Future<void> _openQuickAdd(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+/// [text] inside the open sheet (the screen behind it has its own labels).
+Finder _inSheet(String text) =>
+    find.descendant(of: find.byType(BottomSheet), matching: find.text(text));
+
 Future<void> _pick(WidgetTester tester, String noun) async {
-  await tester.tap(find.text(noun));
+  await tester.tap(_inSheet(noun));
   await tester.pumpAndSettle();
 }
 
@@ -101,7 +105,7 @@ void main() {
 
       await _openQuickAdd(tester);
 
-      expect(find.text('What would you like to add?'), findsOneWidget);
+      expect(_inSheet('What would you like to add?'), findsOneWidget);
       for (final noun in [
         'Event',
         'Task',
@@ -110,10 +114,10 @@ void main() {
         'Expense',
         'Meal',
       ]) {
-        expect(find.text(noun), findsOneWidget, reason: noun);
+        expect(_inSheet(noun), findsOneWidget, reason: noun);
       }
       for (final domain in AppDestination.domains) {
-        expect(find.text(domain.label), findsWidgets, reason: domain.label);
+        expect(_inSheet(domain.label), findsOneWidget, reason: domain.label);
       }
     });
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/core/navigation/app_destination.dart';
+import 'package:mobile/features/home/data/mock_today_data.dart';
 
 import '../support/pump_app.dart';
 
@@ -8,9 +9,9 @@ void main() {
   testWidgets('a new user sees a plain welcome and a way into each area', (
     tester,
   ) async {
-    await pumpApp(tester);
+    await pumpApp(tester, scenario: TodayScenario.firstRun);
 
-    expect(appBarTitle('Home'), findsOneWidget);
+    expect(appBarTitle('Today'), findsOneWidget);
     expect(find.text('Welcome to Synos'), findsOneWidget);
     expect(find.textContaining('Choose an area'), findsOneWidget);
     for (final domain in AppDestination.domains) {
@@ -19,7 +20,7 @@ void main() {
   });
 
   testWidgets('does not scold, count or nag', (tester) async {
-    await pumpApp(tester);
+    await pumpApp(tester, scenario: TodayScenario.firstRun);
 
     for (final phrase in ['overdue', 'missed', 'behind', "don't forget", '!']) {
       expect(find.textContaining(phrase), findsNothing, reason: phrase);
@@ -30,7 +31,7 @@ void main() {
     testWidgets('the ${domain.label} tile opens ${domain.label}', (
       tester,
     ) async {
-      final router = await pumpApp(tester);
+      final router = await pumpApp(tester, scenario: TodayScenario.firstRun);
 
       await tapVisible(tester, find.text(domain.summary!));
 
@@ -42,7 +43,7 @@ void main() {
   testWidgets('lays the areas out in two columns when there is room', (
     tester,
   ) async {
-    await pumpApp(tester, size: tabletSize);
+    await pumpApp(tester, size: tabletSize, scenario: TodayScenario.firstRun);
 
     final calendar = tester.getTopLeft(
       find.text(AppDestination.calendar.summary!),
@@ -53,7 +54,7 @@ void main() {
   });
 
   testWidgets('stacks the areas in one column on a phone', (tester) async {
-    await pumpApp(tester);
+    await pumpApp(tester, scenario: TodayScenario.firstRun);
 
     final calendar = tester.getTopLeft(
       find.text(AppDestination.calendar.summary!),
@@ -66,7 +67,11 @@ void main() {
   testWidgets('scrolls on a short window rather than overflowing', (
     tester,
   ) async {
-    await pumpApp(tester, size: const Size(390, 480));
+    await pumpApp(
+      tester,
+      size: const Size(390, 480),
+      scenario: TodayScenario.firstRun,
+    );
 
     expect(tester.takeException(), isNull);
     await tester.scrollUntilVisible(

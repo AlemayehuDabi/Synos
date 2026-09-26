@@ -32,7 +32,9 @@ Future<GoRouter> pumpApp(
   ThemeMode themeMode = ThemeMode.light,
   TodayScenario scenario = TodayScenario.populated,
   TodayRepository? todayRepository,
+  bool switchableScenarios = false,
   List<Override> overrides = const [],
+  bool settle = true,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -44,14 +46,24 @@ Future<GoRouter> pumpApp(
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
-        todayRepositoryProvider.overrideWithValue(
-          todayRepository ??
-              MockTodayRepository(
-                scenario: scenario,
-                now: testNow,
-                latency: Duration.zero,
-              ),
-        ),
+        if (switchableScenarios)
+          // Follows the debug menu's choice, like the real provider does.
+          todayRepositoryProvider.overrideWith(
+            (ref) => MockTodayRepository(
+              scenario: ref.watch(todayScenarioProvider),
+              now: testNow,
+              latency: Duration.zero,
+            ),
+          )
+        else
+          todayRepositoryProvider.overrideWithValue(
+            todayRepository ??
+                MockTodayRepository(
+                  scenario: scenario,
+                  now: testNow,
+                  latency: Duration.zero,
+                ),
+          ),
         ...overrides,
       ],
       child: MaterialApp.router(
@@ -62,7 +74,12 @@ Future<GoRouter> pumpApp(
       ),
     ),
   );
-  await tester.pumpAndSettle();
+  // A test that wants to look at the loading state passes `settle: false`.
+  if (settle) {
+    await tester.pumpAndSettle();
+  } else {
+    await tester.pump();
+  }
   return router;
 }
 
