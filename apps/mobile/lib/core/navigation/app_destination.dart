@@ -109,11 +109,12 @@ enum AppDestination {
   /// One line saying what the domain is for.
   final String? summary;
 
-  /// The build phase the domain's real screens land in. Null for [home] and
-  /// [more]. Placeholders read it to say "Coming in Phase N".
+  /// The build phase the domain's real screens land in. Only the placeholder
+  /// screens read it, to say "Coming in Phase N"; once a domain ships it is
+  /// unused and can go.
   final int? phase;
 
-  bool get isDomain => phase != null;
+  bool get isDomain => accent != null;
 
   /// A domain reached through [more] on a compact window, where the bottom
   /// bar has no room for it.
