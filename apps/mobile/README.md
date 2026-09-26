@@ -79,6 +79,64 @@ read it, to say "Coming in Phase N", so it can go once the domain ships. In debu
 show two buttons that open a sample detail and edit form, to exercise the nested
 routes.
 
+## Today (Home)
+
+Home is the Today view: the whole day across all six domains on one screen
+(`lib/features/home/`). It is built to read as one system rather than six
+widgets:
+
+- **One card.** Every section is a `TodayCard`: the same surface, header (the
+  domain's icon on a tint of its accent, a title, a short summary), padding and
+  shadow. Accent colors only tint icons, rails and progress bars.
+- **A row for the day.** Under the date, one number per domain (events, open
+  tasks, habits done, meals logged, budget left, next workout), each a way into
+  that domain.
+- **Where domains touch.** The schedule mixes calendar events with the blocks
+  other domains put on the calendar (a task's focus time, a workout, a meal),
+  marked with the source's accent, and a card can carry a one-line note naming
+  the two domains involved.
+- **The inbox.** A card with the count of pending cross-domain suggestions and
+  a badge on the app bar both open `/home/inbox`, a placeholder until Phase 10.
+
+| State | What it shows |
+| --- | --- |
+| Loading | A skeleton shaped like the day |
+| A day | The cards above. A section with nothing in it keeps its card, says so in one plain sentence and offers one way to add something |
+| First run | Nothing set up in any domain: the welcome and a tile for each area |
+| Load failed | "No connection" with Retry |
+| Refresh failed | The day stays on screen, with a snackbar |
+
+Pull down to refresh, on any of them. Checking off a task or a habit works
+(the counts follow), and so does anything added through Quick Add.
+
+Red appears once: going over the weekly budget. A missed habit, an overdue task
+or an empty section is never red, and the copy stays plain (an overdue task is
+"Due yesterday").
+
+### The data is mock
+
+Nothing here calls an API. `TodayRepository`
+(`lib/features/home/data/today_repository.dart`) is the interface the screen
+depends on; `MockTodayRepository` serves made-up days and remembers what the
+user does to them, so a refresh returns their changes. To use the real API,
+implement `TodayRepository` and point `todayRepositoryProvider` at it, the same
+way `authServiceProvider` is swapped.
+
+In debug builds a slider icon in Today's app bar switches the mock day, so every
+state can be reviewed: a busy day, a quiet day with empty sections, first run,
+over budget, and a load error.
+
+## Quick add
+
+The universal "+" (`lib/features/quick_add/`) floats over every top-level
+destination on a phone, and sits at the top of the rail on a wider window. It
+opens a sheet that covers the whole app: pick an area (event, task, habit,
+workout, expense, meal), then fill in a short form. Opened from a domain's own
+screen it goes straight to that domain's form; it can still go back and choose
+another. What is entered is added to the Today data and confirmed in a
+snackbar. On a phone it hides on a detail screen, where the domain's own edit
+action belongs; on a wider window it stays in the rail.
+
 ## Design tokens
 
 `lib/core/theme/`: a deep muted teal (`#1B4B4A`, `#2A6F6D` for interaction) on a
@@ -88,4 +146,5 @@ Finance amber, Meals terracotta); red (`#C0453D`) only for genuine alerts. The
 accents tint icons and containers, they don't carry text: the amber is about
 2.4:1 on the light background, so an icon in it always sits beside a label. On
 dark surfaces interactive text uses `primaryOnDark`, a lifted teal that keeps
-5.9:1. Spacing is the 8pt scale in `AppSpacing`.
+5.9:1, and alert text uses `dangerOnDark` for the same reason. Spacing is the
+8pt scale in `AppSpacing`.
