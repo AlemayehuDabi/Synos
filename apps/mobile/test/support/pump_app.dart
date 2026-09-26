@@ -7,6 +7,13 @@ import 'package:go_router/go_router.dart';
 import 'package:mobile/core/router/app_router.dart';
 import 'package:mobile/core/router/route_paths.dart';
 import 'package:mobile/core/theme/app_theme.dart';
+import 'package:mobile/features/home/data/mock_today_data.dart';
+import 'package:mobile/features/home/data/today_providers.dart';
+import 'package:mobile/features/home/data/today_repository.dart';
+
+/// The moment every test app believes it is: a Saturday morning, so the
+/// budget week has two days left, with a workout and a dinner still ahead.
+final testNow = DateTime(2026, 9, 26, 10, 15);
 
 const phoneSize = Size(390, 844);
 const tabletSize = Size(800, 1000);
@@ -15,11 +22,16 @@ const phoneLandscapeSize = Size(900, 360);
 
 /// Pumps the real app router (no splash, no auth) at [location] in a window
 /// of [size], and returns the router so a test can read where it ended up.
+///
+/// Today's data comes from a made-up day in [scenario] that loads instantly;
+/// pass a [todayRepository] of your own (or more [overrides]) to change that.
 Future<GoRouter> pumpApp(
   WidgetTester tester, {
   String location = RoutePaths.home,
   Size size = phoneSize,
   ThemeMode themeMode = ThemeMode.light,
+  TodayScenario scenario = TodayScenario.populated,
+  TodayRepository? todayRepository,
   List<Override> overrides = const [],
 }) async {
   tester.view.physicalSize = size;
@@ -31,7 +43,17 @@ Future<GoRouter> pumpApp(
 
   await tester.pumpWidget(
     ProviderScope(
-      overrides: overrides,
+      overrides: [
+        todayRepositoryProvider.overrideWithValue(
+          todayRepository ??
+              MockTodayRepository(
+                scenario: scenario,
+                now: testNow,
+                latency: Duration.zero,
+              ),
+        ),
+        ...overrides,
+      ],
       child: MaterialApp.router(
         theme: AppTheme.light,
         darkTheme: AppTheme.dark,
@@ -104,3 +126,7 @@ Future<void> tapVisible(WidgetTester tester, Finder finder) async {
   await tester.tap(finder);
   await tester.pumpAndSettle();
 }
+
+/// The app's provider container, for reading state a test can't see on screen.
+ProviderContainer containerOf(WidgetTester tester) =>
+    ProviderScope.containerOf(tester.element(find.byType(MaterialApp)));
