@@ -43,7 +43,7 @@ class DomainPlaceholderScreen extends StatelessWidget {
             tooltip: 'Edit $_entity',
             onPressed: id == null
                 ? null
-                : () => context.push(destination.editPath(id!)),
+                : () => context.go(destination.editPath(id!)),
           ),
         ],
         body: _content(context, 'Details for this $_entity will appear here.'),
@@ -69,7 +69,7 @@ class DomainPlaceholderScreen extends StatelessWidget {
         IconButton(
           icon: const Icon(Icons.add_rounded),
           tooltip: 'New $_entity',
-          onPressed: () => context.push(destination.newPath),
+          onPressed: () => context.go(destination.newPath),
         ),
       ],
       body: _content(
@@ -134,12 +134,11 @@ class _DebugRoutePreview extends StatelessWidget {
             alignment: WrapAlignment.center,
             children: [
               TextButton(
-                onPressed: () =>
-                    context.push(destination.detailPath(_sampleId)),
+                onPressed: () => context.go(destination.detailPath(_sampleId)),
                 child: const Text('Open detail'),
               ),
               TextButton(
-                onPressed: () => context.push(destination.editPath(_sampleId)),
+                onPressed: () => context.go(destination.editPath(_sampleId)),
                 child: const Text('Open edit form'),
               ),
             ],
